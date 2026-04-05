@@ -29,6 +29,14 @@ impl RuntimeServer {
     }
 
     pub async fn start(&self) -> Result<()> {
+        // Start JS worker pool
+        {
+            let mut runtime = self.state.js_runtime.write().await;
+            if let Err(e) = runtime.start().await {
+                tracing::warn!("JS workers not started: {e} — handlers will return debug responses");
+            }
+        }
+
         let analysis = self.state.analysis.read().await;
         let router = build_router(Arc::clone(&self.state), &analysis)
             .layer(CorsLayer::permissive())
@@ -51,9 +59,9 @@ impl RuntimeServer {
         let mut analysis = self.state.analysis.write().await;
         *analysis = new_analysis;
 
-        // Reset the JS runtime to pick up new code
-        let mut runtime = self.state.js_runtime.write().await;
-        *runtime = JsRuntime::new(self.state.project_root.clone());
+        // Invalidate JS module caches (keep workers alive)
+        let runtime = self.state.js_runtime.read().await;
+        runtime.invalidate().await?;
 
         Ok(())
     }

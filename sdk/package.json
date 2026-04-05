@@ -1,0 +1,38 @@
+{
+  "name": "cooper",
+  "version": "0.1.0",
+  "description": "The backend framework for TypeScript",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./api": "./dist/api.js",
+    "./db": "./dist/db.js",
+    "./middleware": "./dist/middleware.js",
+    "./auth": "./dist/auth.js",
+    "./pubsub": "./dist/pubsub.js",
+    "./cron": "./dist/cron.js",
+    "./cache": "./dist/cache.js",
+    "./storage": "./dist/storage.js",
+    "./secrets": "./dist/secrets.js",
+    "./queue": "./dist/queue.js",
+    "./ssr": "./dist/ssr.js",
+    "./islands": "./dist/islands.js",
+    "./ai": "./dist/ai.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "pg": "^8.13.0",
+    "mysql2": "^3.11.0",
+    "ioredis": "^5.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0"
+  }
+}

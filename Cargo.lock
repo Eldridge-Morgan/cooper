@@ -426,6 +426,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "uuid",
+ "which",
 ]
 
 [[package]]

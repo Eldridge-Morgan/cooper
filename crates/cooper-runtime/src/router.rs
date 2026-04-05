@@ -2,7 +2,7 @@ use crate::error::{CooperError, ErrorCode};
 use crate::js::JsRuntime;
 use axum::body::Body;
 use axum::extract::Path;
-use axum::http::{Request, StatusCode};
+use axum::http::{HeaderMap, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
@@ -26,77 +26,79 @@ pub fn build_router(state: Arc<AppState>, analysis: &ProjectAnalysis) -> Router 
         let axum_path = cooper_path_to_axum(&route.path);
         let route_info = route.clone();
 
-        match route.method.as_str() {
-            "GET" => {
-                router = router.route(
-                    &axum_path,
-                    get({
-                        let state = Arc::clone(&state);
-                        let info = route_info.clone();
-                        move |path_params: Option<Path<HashMap<String, String>>>,
-                              req: Request<Body>| {
-                            handle_request(state, info, path_params, req)
-                        }
-                    }),
-                );
+        let handler = {
+            let state = Arc::clone(&state);
+            let info = route_info.clone();
+            move |path_params: Option<Path<HashMap<String, String>>>,
+                  headers: HeaderMap,
+                  req: Request<Body>| {
+                let state = Arc::clone(&state);
+                let info = info.clone();
+                async move { handle_request(state, info, path_params, headers, req).await }
             }
-            "POST" => {
-                router = router.route(
-                    &axum_path,
-                    post({
-                        let state = Arc::clone(&state);
-                        let info = route_info.clone();
-                        move |path_params: Option<Path<HashMap<String, String>>>,
-                              req: Request<Body>| {
-                            handle_request(state, info, path_params, req)
-                        }
-                    }),
-                );
-            }
-            "PUT" => {
-                router = router.route(
-                    &axum_path,
-                    put({
-                        let state = Arc::clone(&state);
-                        let info = route_info.clone();
-                        move |path_params: Option<Path<HashMap<String, String>>>,
-                              req: Request<Body>| {
-                            handle_request(state, info, path_params, req)
-                        }
-                    }),
-                );
-            }
-            "PATCH" => {
-                router = router.route(
-                    &axum_path,
-                    patch({
-                        let state = Arc::clone(&state);
-                        let info = route_info.clone();
-                        move |path_params: Option<Path<HashMap<String, String>>>,
-                              req: Request<Body>| {
-                            handle_request(state, info, path_params, req)
-                        }
-                    }),
-                );
-            }
-            "DELETE" => {
-                router = router.route(
-                    &axum_path,
-                    delete({
-                        let state = Arc::clone(&state);
-                        let info = route_info.clone();
-                        move |path_params: Option<Path<HashMap<String, String>>>,
-                              req: Request<Body>| {
-                            handle_request(state, info, path_params, req)
-                        }
-                    }),
-                );
-            }
+        };
+
+        router = match route.method.as_str() {
+            "GET" => router.route(&axum_path, get(handler)),
+            "POST" => router.route(&axum_path, post(handler)),
+            "PUT" => router.route(&axum_path, put(handler)),
+            "PATCH" => router.route(&axum_path, patch(handler)),
+            "DELETE" => router.route(&axum_path, delete(handler)),
             _ => {
                 tracing::warn!("Unsupported method: {}", route.method);
+                router
             }
-        }
+        };
     }
+
+    // Health check endpoint (always present)
+    router = router.route(
+        "/_cooper/health",
+        get(|| async { (StatusCode::OK, r#"{"status":"ok"}"#) }),
+    );
+
+    // Info endpoint — returns analyzed routes
+    let info_state = Arc::clone(&state);
+    router = router.route(
+        "/_cooper/info",
+        get(move || {
+            let state = Arc::clone(&info_state);
+            async move {
+                let analysis = state.analysis.read().await;
+                let info = serde_json::json!({
+                    "routes": analysis.routes.iter().map(|r| {
+                        serde_json::json!({
+                            "method": r.method,
+                            "path": r.path,
+                            "auth": r.auth,
+                            "handler": r.export_name,
+                            "source": r.source_file,
+                        })
+                    }).collect::<Vec<_>>(),
+                    "databases": analysis.databases.iter().map(|d| {
+                        serde_json::json!({ "name": d.name, "engine": d.engine })
+                    }).collect::<Vec<_>>(),
+                    "topics": analysis.topics.iter().map(|t| {
+                        serde_json::json!({ "name": t.name })
+                    }).collect::<Vec<_>>(),
+                    "crons": analysis.crons.iter().map(|c| {
+                        serde_json::json!({ "name": c.name, "schedule": c.schedule })
+                    }).collect::<Vec<_>>(),
+                    "queues": analysis.queues.iter().map(|q| {
+                        serde_json::json!({ "name": q.name })
+                    }).collect::<Vec<_>>(),
+                    "pages": analysis.pages.iter().map(|p| {
+                        serde_json::json!({ "route": p.route, "source": p.source_file })
+                    }).collect::<Vec<_>>(),
+                });
+                (
+                    StatusCode::OK,
+                    [("content-type", "application/json")],
+                    serde_json::to_string_pretty(&info).unwrap(),
+                )
+            }
+        }),
+    );
 
     router.with_state(())
 }
@@ -105,11 +107,25 @@ async fn handle_request(
     state: Arc<AppState>,
     route: RouteInfo,
     path_params: Option<Path<HashMap<String, String>>>,
+    headers: HeaderMap,
     req: Request<Body>,
 ) -> Response {
-    let params = path_params
-        .map(|Path(p)| p)
-        .unwrap_or_default();
+    let params = path_params.map(|Path(p)| p).unwrap_or_default();
+
+    // Extract auth token from Authorization header
+    let auth_token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string());
+
+    // Collect headers into a HashMap for the JS bridge
+    let header_map: HashMap<String, String> = headers
+        .iter()
+        .filter_map(|(k, v)| {
+            v.to_str().ok().map(|val| (k.as_str().to_string(), val.to_string()))
+        })
+        .collect();
 
     // Read the request body
     let body_bytes = match axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024).await {
@@ -144,14 +160,46 @@ async fn handle_request(
     // Execute via JS runtime
     let runtime = state.js_runtime.read().await;
     match runtime
-        .call_handler(&route.source_file, &route.export_name, &input)
+        .call_handler_with_auth(
+            &route.source_file,
+            &route.export_name,
+            &input,
+            auth_token.as_deref(),
+            Some(&header_map),
+        )
         .await
     {
-        Ok(result) => (StatusCode::OK, [("content-type", "application/json")], result).into_response(),
+        Ok(result) => (
+            StatusCode::OK,
+            [("content-type", "application/json")],
+            result,
+        )
+            .into_response(),
         Err(e) => {
-            // Try to parse as a CooperError from JS
-            if let Ok(err) = serde_json::from_str::<CooperError>(&e.to_string()) {
-                return err.into_response();
+            let err_str = e.to_string();
+            // Try to parse as a Cooper structured error
+            if let Ok(parsed) = serde_json::from_str::<Value>(&err_str) {
+                if let Some(error_obj) = parsed.get("error") {
+                    let code = error_obj
+                        .get("code")
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("INTERNAL");
+                    let status = match code {
+                        "NOT_FOUND" => StatusCode::NOT_FOUND,
+                        "UNAUTHORIZED" => StatusCode::UNAUTHORIZED,
+                        "PERMISSION_DENIED" => StatusCode::FORBIDDEN,
+                        "RATE_LIMITED" => StatusCode::TOO_MANY_REQUESTS,
+                        "INVALID_ARGUMENT" => StatusCode::BAD_REQUEST,
+                        "VALIDATION_FAILED" => StatusCode::UNPROCESSABLE_ENTITY,
+                        _ => StatusCode::INTERNAL_SERVER_ERROR,
+                    };
+                    return (
+                        status,
+                        [("content-type", "application/json")],
+                        err_str,
+                    )
+                        .into_response();
+                }
             }
             CooperError::new(ErrorCode::Internal, format!("Handler error: {e}")).into_response()
         }

@@ -1,4 +1,5 @@
 pub mod error;
+pub mod infra;
 pub mod js;
 pub mod router;
 pub mod server;
