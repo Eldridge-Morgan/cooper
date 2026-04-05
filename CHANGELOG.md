@@ -2,6 +2,36 @@
 
 All notable changes to Cooper will be documented in this file.
 
+## [0.3.1] - 2026-04-06
+
+### Added
+
+- **Example blog app** (`examples/blog/`) — full-stack example with:
+  - User CRUD with Zod validation, caching, event publishing
+  - Blog posts with auth-protected create/update/delete, search, pub/sub events
+  - Notification service with job queues, dead-letter queue, DLQ replay endpoint
+  - Background search indexer via queue workers
+  - Auth handler with JWT placeholder
+  - Cron jobs (session cleanup, daily digest)
+  - SSR pages (homepage, post listing, dynamic post detail)
+  - Island component (LikeButton with client hydration)
+  - 14 API routes, 2 databases, 2 topics, 3 queues, 2 crons, 3 pages
+
+### Fixed
+
+- **SDK auto-injection** — `cooper run` now injects the Cooper SDK into `node_modules/cooper` automatically, overriding any conflicting npm package. JS handlers can now `import { api } from "cooper/api"` without manual npm installation.
+- **Route conflict resolution** — SSR page routes that overlap with API routes are skipped (API takes priority), preventing Axum panics on overlapping paths.
+
+### Verified E2E
+
+- `GET /health` → real JS handler execution returning `{ status, timestamp, uptime }`
+- `GET /users` → executes Postgres query via Cooper DB client
+- `POST /posts` with auth → middleware chain validates token, returns structured error when no auth handler registered
+- Static analysis finds all 14 routes, 2 databases, 2 topics, 3 queues, 2 crons, 3 pages
+- SSR renders full HTML documents with `<!DOCTYPE html>`, meta tags, styles
+- Client codegen generates 15 typed methods (TS), 14 methods (Rust), 14 methods (Python)
+- Deploy dry-run: AWS $68/mo, GCP $30/mo, Azure $43/mo, Fly $0/mo
+
 ## [0.3.0] - 2026-04-06
 
 ### Added

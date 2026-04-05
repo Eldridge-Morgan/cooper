@@ -11,6 +11,9 @@ use tokio::sync::mpsc;
 pub async fn run(_all: bool, port: u16) -> Result<()> {
     let project_root = find_project_root()?;
 
+    // Phase 0: Ensure Cooper SDK is available
+    ensure_sdk(&project_root)?;
+
     eprintln!("  {} Analyzing project...", "→".cyan());
 
     // Phase 1: Static analysis
@@ -136,6 +139,81 @@ pub async fn run(_all: bool, port: u16) -> Result<()> {
     infra.stop().await;
 
     result
+}
+
+/// Ensure the Cooper SDK is available in node_modules/ so user code
+/// can `import { api } from "cooper/api"` etc.
+fn ensure_sdk(project_root: &PathBuf) -> Result<()> {
+    let sdk_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sdk/src");
+    let nm_cooper = project_root.join("node_modules/cooper");
+
+    // Check if our SDK is already there (not the npm `cooper` package)
+    if nm_cooper.join("package.json").exists() {
+        let pkg_content = std::fs::read_to_string(nm_cooper.join("package.json")).unwrap_or_default();
+        if pkg_content.contains("\"description\": \"The backend framework for TypeScript\"") {
+            return Ok(());
+        }
+        // Wrong package — remove it and install ours
+        std::fs::remove_dir_all(&nm_cooper)?;
+    }
+
+    // Create node_modules/cooper with the SDK modules
+    std::fs::create_dir_all(nm_cooper.join("dist"))?;
+
+    // If the SDK source exists (development), symlink or copy it
+    if sdk_source.exists() {
+        // Write a package.json that re-exports from src/
+        let pkg = serde_json::json!({
+            "name": "cooper",
+            "version": "0.1.0",
+            "description": "The backend framework for TypeScript",
+            "type": "module",
+            "main": "dist/index.js",
+            "exports": {
+                ".": "./dist/index.js",
+                "./api": "./dist/api.js",
+                "./db": "./dist/db.js",
+                "./middleware": "./dist/middleware.js",
+                "./auth": "./dist/auth.js",
+                "./pubsub": "./dist/pubsub.js",
+                "./cron": "./dist/cron.js",
+                "./cache": "./dist/cache.js",
+                "./storage": "./dist/storage.js",
+                "./secrets": "./dist/secrets.js",
+                "./queue": "./dist/queue.js",
+                "./ssr": "./dist/ssr.js",
+                "./islands": "./dist/islands.js",
+                "./ai": "./dist/ai.js"
+            }
+        });
+        std::fs::write(
+            nm_cooper.join("package.json"),
+            serde_json::to_string_pretty(&pkg)?,
+        )?;
+
+        // Copy each .ts file as .js (Bun can import .ts directly, but
+        // we also write .js re-exports for Node compatibility)
+        for entry in std::fs::read_dir(&sdk_source)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().map(|e| e == "ts").unwrap_or(false) {
+                let stem = path.file_stem().unwrap().to_string_lossy();
+                let dest = nm_cooper.join("dist").join(format!("{stem}.js"));
+
+                // For Bun: just re-export from the .ts source
+                let relative = pathdiff::diff_paths(&path, nm_cooper.join("dist"))
+                    .unwrap_or_else(|| path.clone());
+                let relative_str = relative.to_string_lossy().replace('\\', "/");
+
+                std::fs::write(
+                    &dest,
+                    format!("export * from \"{relative_str}\";\n"),
+                )?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn find_project_root() -> Result<PathBuf> {

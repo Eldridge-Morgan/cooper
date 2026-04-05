@@ -101,15 +101,28 @@ pub fn build_router(state: Arc<AppState>, analysis: &ProjectAnalysis) -> Router 
         }),
     );
 
-    // SSR page routes — serve HTML
+    // SSR page routes — serve HTML (skip pages that conflict with API routes)
+    let api_get_paths: std::collections::HashSet<String> = analysis
+        .routes
+        .iter()
+        .filter(|r| r.method == "GET")
+        .map(|r| cooper_path_to_axum(&r.path))
+        .collect();
+
     for page in &analysis.pages {
         if page.has_layout {
-            continue; // Layouts are not routable
+            continue;
         }
 
         let axum_path = cooper_path_to_axum(&page.route);
-        let page_info = page.clone();
 
+        // Skip if an API route already handles this path
+        if api_get_paths.contains(&axum_path) {
+            tracing::info!("Skipping SSR page {} — API route takes priority", page.route);
+            continue;
+        }
+
+        let page_info = page.clone();
         let handler = {
             let state = Arc::clone(&state);
             let info = page_info.clone();

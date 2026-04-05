@@ -1,0 +1,18 @@
+{
+  "name": "cooper-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cooper run",
+    "build": "cooper build",
+    "deploy": "cooper deploy"
+  },
+  "dependencies": {
+    "cooper": "latest",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.7",
+    "@types/node": "^22"
+  }
+}

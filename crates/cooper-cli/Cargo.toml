@@ -25,3 +25,4 @@ serde_json.workspace = true
 notify.workspace = true
 which.workspace = true
 toml.workspace = true
+pathdiff.workspace = true
