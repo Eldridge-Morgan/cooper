@@ -1,0 +1,15 @@
+[package]
+name = "cooper-deploy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cooper-codegen = { path = "../cooper-codegen" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true

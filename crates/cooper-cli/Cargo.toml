@@ -1,0 +1,27 @@
+[package]
+name = "cooper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "cooper"
+path = "src/main.rs"
+
+[dependencies]
+cooper-runtime = { path = "../cooper-runtime" }
+cooper-codegen = { path = "../cooper-codegen" }
+cooper-deploy = { path = "../cooper-deploy" }
+tokio.workspace = true
+clap.workspace = true
+colored.workspace = true
+indicatif.workspace = true
+dialoguer.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+notify.workspace = true
+which.workspace = true
+toml.workspace = true
