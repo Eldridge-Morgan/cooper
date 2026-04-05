@@ -2,6 +2,34 @@
 
 All notable changes to Cooper will be documented in this file.
 
+## [0.3.0] - 2026-04-06
+
+### Added
+
+- **Cloud Provisioning** — real infrastructure deployment for all four cloud targets:
+  - **AWS**: VPC + subnets + security groups, RDS Postgres/MySQL, ElastiCache Redis, SNS topics, SQS queues, S3 buckets, ECR repositories, ECS Fargate services. Full networking setup with internet gateway, multi-AZ subnets, and security group rules.
+  - **GCP**: Cloud SQL, Memorystore Redis, Pub/Sub topics, GCS buckets, Cloud Run services. Automatic API enablement.
+  - **Azure**: Resource groups, Azure PostgreSQL Flexible Server, Azure Cache for Redis, Service Bus queues, Blob Storage accounts, Container Apps with auto-scaling ingress.
+  - **Fly.io**: Fly Postgres clusters, Upstash Redis, Fly Volumes for storage, Fly Machines with auto-generated `fly.toml`.
+  - All providers: credential verification, deployment state persistence (`.cooper/state/`), interactive confirmation prompt with `dialoguer`
+
+- **SSR Rendering Engine** — server-side rendering pipeline in the Rust router:
+  - Page routes from `pages/` directory serve full HTML documents
+  - Proper HTML5 document structure with charset, viewport, base styles
+  - Island hydration script generation — supports all 5 hydration strategies: `load`, `visible` (IntersectionObserver), `idle` (requestIdleCallback), `interaction` (click/focus/mouseover), `none`
+  - Island registry that scans `islands/` directory for `.island.tsx` files
+  - Graceful fallback rendering when JS bridge isn't connected
+
+- **Deploy State Management** — tracks provisioned resources per environment in `.cooper/state/{env}/deploy.json`
+- **Environment Listing** — `cooper env ls` reads from deploy state
+- **Interactive Deploy** — `cooper deploy` prompts for confirmation before provisioning (skippable with `--dry-run`)
+
+### Changed
+
+- `cooper deploy` now actually provisions cloud resources (previously only showed the plan)
+- Deploy command reads project name from directory and passes it to provisioners
+- All cloud providers save timestamped deployment state for destroy/status operations
+
 ## [0.2.0] - 2026-04-06
 
 ### Added
