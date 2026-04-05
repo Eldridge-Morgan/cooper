@@ -5,7 +5,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::js::JsRuntime;
-use crate::router::AppState;
 
 /// Handle a WebSocket upgrade for a Cooper route with `stream: "websocket"`.
 pub fn ws_upgrade(

@@ -125,7 +125,7 @@ async fn run_single_app(project_root: PathBuf, port: u16) -> Result<()> {
     eprintln!(
         "  {} Dashboard at {}",
         "📊",
-        "http://localhost:9400".cyan().underline()
+        "http://localhost:9500".cyan().underline()
     );
     eprintln!(
         "  {} API info at {}",

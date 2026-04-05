@@ -1,3 +1,4 @@
+pub mod dashboard;
 pub mod error;
 pub mod infra;
 pub mod js;

@@ -2,6 +2,21 @@
 
 All notable changes to Cooper will be documented in this file.
 
+## [0.5.0] - 2026-04-06
+
+### Added
+
+- **Dashboard UI** at localhost:9500 — live service map powered by **dagre** auto-layout:
+  - **Map tab**: SVG flowchart generated from project analysis — service boxes (route counts, auth, databases, crons), inverted black pills for topics/queues, animated dashed arrows showing data flow between nodes. Layout computed automatically by dagre (LR direction, auto node spacing).
+  - **Routes tab**: compact table of all API routes with method, path, handler, source, AUTH badges
+  - **Explorer tab**: split-pane API explorer — pick a route, set headers/body, send request, see formatted response with status code and latency. Prompts for path params.
+  - **Log tab**: live request log populated from Explorer sends — timestamp, method, path, status, duration
+  - **ASCII logo** with decrypt animation: scramble → resolve left-to-right → idle glitch every 5s
+  - **Live status indicator**: pulsing dot, polls `/_cooper/health` every 5s
+  - Self-contained single HTML page (~10KB) served from Rust, dagre loaded from CDN
+  - Port fallback: tries 9500, then 9501–9509 if taken. Never blocks the main server.
+  - Monochrome, monospace, sharp corners, minimal CSS
+
 ## [0.4.0] - 2026-04-06
 
 ### Added

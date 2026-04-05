@@ -1,3 +1,4 @@
+use crate::dashboard;
 use crate::js::JsRuntime;
 use crate::router::{build_router, AppState};
 use anyhow::Result;
@@ -9,6 +10,8 @@ use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
+
+const DASHBOARD_PORT: u16 = 9500;
 
 pub struct RuntimeServer {
     port: u16,
@@ -43,6 +46,12 @@ impl RuntimeServer {
             .layer(TraceLayer::new_for_http());
         drop(analysis);
 
+        // Start dashboard on a background task (non-fatal if port is taken)
+        let api_port = self.port;
+        tokio::spawn(async move {
+            dashboard::server::start(DASHBOARD_PORT, api_port).await;
+        });
+
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
         let listener = TcpListener::bind(addr).await?;
         axum::serve(listener, router).await?;
@@ -51,15 +60,12 @@ impl RuntimeServer {
     }
 
     pub async fn reload(&self) -> Result<()> {
-        // Re-analyze the project
         let new_analysis =
             cooper_codegen::analyzer::analyze(&self.state.project_root)?;
 
-        // Swap in the new analysis
         let mut analysis = self.state.analysis.write().await;
         *analysis = new_analysis;
 
-        // Invalidate JS module caches (keep workers alive)
         let runtime = self.state.js_runtime.read().await;
         runtime.invalidate().await?;
 
