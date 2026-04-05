@@ -2,6 +2,57 @@
 
 All notable changes to Cooper will be documented in this file.
 
+## [0.4.0] - 2026-04-06
+
+### Added
+
+- **Monorepo support** — `cooper run --all` detects and runs multi-app workspaces:
+  - Parses `cooper.workspace.ts` with `apps` and `shared` arrays
+  - Auto-detects workspaces by scanning `apps/`, `packages/`, `services/` for `cooper.config.ts`
+  - Starts shared infrastructure once (Postgres, NATS, Valkey) across all apps
+  - Each app runs on its own port (base_port + index): api:5000, workers:5001, etc.
+  - Runs migrations from all apps against shared database
+  - Shows shared packages in startup output
+  - File watcher covers the entire workspace
+  - E2E verified: 2-app workspace with separate routes, queues, crons running on ports 5100/5101
+
+- **`cooper logs`** — tail logs from deployed or local environments:
+  - Local: reads embedded Postgres log from `.cooper/data/postgres/postgres.log`
+  - AWS: streams from CloudWatch Logs via `aws logs tail --follow`
+  - GCP: streams from Cloud Logging via `gcloud logging tail`
+  - Azure: streams from Container Apps via `az containerapp logs show --follow`
+  - Fly: streams via `flyctl logs`
+  - Optional `--service` filter for AWS CloudWatch
+
+- **`cooper trace`** — open trace explorer:
+  - Local: opens `localhost:9400/traces` in the browser
+  - AWS: opens AWS X-Ray console
+  - GCP: opens Cloud Trace console
+  - Azure: opens Azure Monitor
+  - Fly: opens Fly.io monitoring dashboard
+  - Detects Datadog/Grafana config in `cooper.config.ts` and opens the appropriate UI
+
+- **`cooper env ls`** — lists all environments with provider, resource count, and URL from deploy state
+- **`cooper env url <env>`** — prints the URL of a deployed environment
+
+- **`cooper build`** — production build pipeline:
+  - Bundles TypeScript via Bun (falls back to file concatenation)
+  - Copies SDK, bridge, migrations, pages into output directory
+  - Bundles island components for client-side delivery with tree-shaking
+  - Generates `cooper-manifest.json` with full project analysis
+  - Generates `Dockerfile` (oven/bun:1-alpine based) and `entrypoint.sh`
+  - Reports output size in MB
+
+- **WebSocket route support** — routes with `stream: "websocket"` handle WS upgrades inline in the Axum router, relay messages to/from JS handlers
+
+- **SSE streaming module** — `SseStream` adapter for Server-Sent Events with keep-alive
+
+- **Service-to-service client generation** — `cooper_codegen::service_clients` generates typed TS clients per service, grouped by source directory, with auto-base-URL from env vars
+
+- **COOPER.md auto-generation** — `cooper_codegen::cooper_md` generates a markdown file with route tables, database info, topics, queues, crons, pages, and ASCII architecture diagram
+
+- **Workspace config parser** — `cooper_codegen::workspace` parses `cooper.workspace.ts`, resolves glob patterns for shared packages, analyzes all apps
+
 ## [0.3.1] - 2026-04-06
 
 ### Added

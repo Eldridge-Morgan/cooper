@@ -2,12 +2,12 @@ use crate::error::{CooperError, ErrorCode};
 use crate::js::JsRuntime;
 use crate::ssr::renderer::SsrRenderer;
 use axum::body::Body;
-use axum::extract::Path;
+use axum::extract::{Path, WebSocketUpgrade};
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post, put};
+use axum::routing::{any, delete, get, patch, post, put};
 use axum::Router;
-use cooper_codegen::analyzer::{PageInfo, ProjectAnalysis, RouteInfo};
+use cooper_codegen::analyzer::{PageInfo, ProjectAnalysis, RouteInfo, StreamKind};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,8 +25,57 @@ pub fn build_router(state: Arc<AppState>, analysis: &ProjectAnalysis) -> Router 
 
     for route in &analysis.routes {
         let axum_path = cooper_path_to_axum(&route.path);
-        let route_info = route.clone();
 
+        // WebSocket routes use `any` with upgrade handling
+        if matches!(route.stream, Some(StreamKind::WebSocket)) {
+            let ws_state = Arc::clone(&state);
+            let ws_source = route.source_file.clone();
+            let ws_export = route.export_name.clone();
+
+            router = router.route(
+                &axum_path,
+                any({
+                    let state = Arc::clone(&ws_state);
+                    let source = ws_source;
+                    let export = ws_export;
+                    move |ws: WebSocketUpgrade| {
+                        let state = Arc::clone(&state);
+                        let source = source.clone();
+                        let export = export.clone();
+                        async move {
+                            ws.on_upgrade(move |mut socket| async move {
+                                use axum::extract::ws::Message;
+                                while let Some(Ok(msg)) = socket.recv().await {
+                                    match msg {
+                                        Message::Text(text) => {
+                                            let input: Value = serde_json::from_str(&text)
+                                                .unwrap_or(Value::String(text.to_string()));
+                                            let rt = state.js_runtime.read().await;
+                                            let call_input = serde_json::json!({ "data": input, "type": "message" });
+                                            match rt.call_handler(&source, &export, &call_input).await {
+                                                Ok(resp) => { if socket.send(Message::Text(resp.into())).await.is_err() { break; } }
+                                                Err(e) => {
+                                                    let err = serde_json::json!({"error": e.to_string()}).to_string();
+                                                    if socket.send(Message::Text(err.into())).await.is_err() { break; }
+                                                }
+                                            }
+                                        }
+                                        Message::Close(_) => break,
+                                        _ => {}
+                                    }
+                                }
+                            })
+                        }
+                    }
+                }),
+            );
+            continue;
+        }
+
+        // SSE routes handled as regular GET but with streaming response
+        // (the JS handler yields events, Rust streams them)
+
+        let route_info = route.clone();
         let handler = {
             let state = Arc::clone(&state);
             let info = route_info.clone();

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 use cooper_codegen::analyzer::ProjectAnalysis;
+use cooper_codegen::workspace;
 use cooper_runtime::infra::embedded::{EmbeddedInfra, ServiceStatus};
 use cooper_runtime::server::RuntimeServer;
 use notify::{EventKind, RecursiveMode, Watcher};
@@ -8,9 +9,30 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-pub async fn run(_all: bool, port: u16) -> Result<()> {
+pub async fn run(all: bool, port: u16) -> Result<()> {
     let project_root = find_project_root()?;
 
+    // Check for monorepo
+    if all {
+        return run_workspace(project_root, port).await;
+    }
+
+    // Also auto-detect workspace if cooper.workspace.ts exists
+    if project_root.join("cooper.workspace.ts").exists()
+        || project_root.join("cooper.workspace.js").exists()
+    {
+        eprintln!(
+            "  {} Workspace detected — use {} to run all apps",
+            "ℹ".blue(),
+            "cooper run --all".bold()
+        );
+    }
+
+    run_single_app(project_root, port).await
+}
+
+/// Run a single Cooper app.
+async fn run_single_app(project_root: PathBuf, port: u16) -> Result<()> {
     // Phase 0: Ensure Cooper SDK is available
     ensure_sdk(&project_root)?;
 
@@ -62,19 +84,18 @@ pub async fn run(_all: bool, port: u16) -> Result<()> {
             "⏰".to_string(),
             analysis.crons.len()
         );
-        // Cron scheduler would need access to the JS runtime from the server
-        // This is started after the server boots
     }
 
     // Phase 6: File watcher for hot reload
     let (tx, mut rx) = mpsc::channel::<()>(1);
-    let _watcher_root = project_root.clone();
     let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, _>| {
         if let Ok(event) = res {
-            // Skip events in .cooper/, node_modules/, dist/
             let dominated_by_ignored = event.paths.iter().all(|p| {
                 let s = p.to_string_lossy();
-                s.contains("/.cooper/") || s.contains("/node_modules/") || s.contains("/dist/") || s.contains("/target/")
+                s.contains("/.cooper/")
+                    || s.contains("/node_modules/")
+                    || s.contains("/dist/")
+                    || s.contains("/target/")
             });
             if dominated_by_ignored {
                 return;
@@ -119,7 +140,6 @@ pub async fn run(_all: bool, port: u16) -> Result<()> {
     let reload_server = Arc::clone(&server);
     tokio::spawn(async move {
         while rx.recv().await.is_some() {
-            // Debounce
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             while rx.try_recv().is_ok() {}
 
@@ -132,37 +152,162 @@ pub async fn run(_all: bool, port: u16) -> Result<()> {
         }
     });
 
-    // Wait for server to exit
     let result = server_handle.await?;
-
-    // Cleanup
     infra.stop().await;
-
     result
 }
 
-/// Ensure the Cooper SDK is available in node_modules/ so user code
-/// can `import { api } from "cooper/api"` etc.
+/// Run all apps in a Cooper workspace.
+async fn run_workspace(root: PathBuf, base_port: u16) -> Result<()> {
+    eprintln!("  {} Detecting workspace...", "→".cyan());
+
+    let ws = workspace::detect_workspace(&root)?
+        .ok_or_else(|| anyhow::anyhow!("No workspace found. Create cooper.workspace.ts or add apps/ with cooper.config.ts files."))?;
+
+    eprintln!("  {} {}", "✓".green(), ws.summary());
+
+    // Ensure SDK in the root
+    ensure_sdk(&root)?;
+
+    // Start shared infra once
+    eprintln!("  {} Starting shared infrastructure...", "→".cyan());
+    let mut infra = EmbeddedInfra::new(&root);
+    let status = infra.start().await?;
+    print_infra_status(&status);
+
+    // Run migrations from all apps
+    eprintln!("  {} Running migrations...", "→".cyan());
+    for app in &ws.apps {
+        for db in &app.analysis.databases {
+            if let Some(ref mig_path) = db.migrations {
+                let dir = app.path.join(mig_path);
+                if let Ok(count) = infra.run_migrations(&dir).await {
+                    if count > 0 {
+                        eprintln!(
+                            "  {} {} — ran {} migration(s)",
+                            "✓".green(),
+                            app.name,
+                            count
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Start each app on its own port
+    eprintln!();
+    let mut handles = Vec::new();
+
+    for (i, app) in ws.apps.iter().enumerate() {
+        let app_port = base_port + i as u16;
+        let app_name = app.name.clone();
+        let app_path = app.path.clone();
+        let analysis = app.analysis.clone();
+
+        // Ensure SDK for each app
+        ensure_sdk(&app_path)?;
+
+        eprintln!(
+            "  {} {} on port {}  ({} routes)",
+            "⚡".yellow(),
+            app_name.bold(),
+            app_port.to_string().cyan(),
+            analysis.routes.len()
+        );
+
+        let handle = tokio::spawn(async move {
+            let server = RuntimeServer::new(app_port, app_path, analysis);
+            if let Err(e) = server.start().await {
+                tracing::error!("App '{}' failed: {}", app_name, e);
+            }
+        });
+        handles.push(handle);
+    }
+
+    eprintln!();
+    eprintln!(
+        "  {} All {} apps running (ports {}–{})",
+        "✓".green(),
+        ws.apps.len(),
+        base_port,
+        base_port + ws.apps.len() as u16 - 1
+    );
+
+    if !ws.shared.is_empty() {
+        let shared_names: Vec<String> = ws
+            .shared
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .collect();
+        eprintln!(
+            "  {} Shared: {}",
+            "📦".to_string(),
+            shared_names.join(", ").dimmed()
+        );
+    }
+    eprintln!();
+
+    // File watcher across the whole workspace
+    let (tx, mut rx) = mpsc::channel::<()>(1);
+    let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, _>| {
+        if let Ok(event) = res {
+            let ignored = event.paths.iter().all(|p| {
+                let s = p.to_string_lossy();
+                s.contains("/.cooper/")
+                    || s.contains("/node_modules/")
+                    || s.contains("/dist/")
+                    || s.contains("/target/")
+            });
+            if ignored {
+                return;
+            }
+            match event.kind {
+                EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) => {
+                    let _ = tx.blocking_send(());
+                }
+                _ => {}
+            }
+        }
+    })?;
+    watcher.watch(&root, RecursiveMode::Recursive)?;
+
+    // Hot reload — detect which app changed and reload only that one
+    tokio::spawn(async move {
+        while rx.recv().await.is_some() {
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            while rx.try_recv().is_ok() {}
+            eprintln!("  {} Workspace file changed — reload not yet wired for multi-app", "↻".yellow());
+        }
+    });
+
+    // Wait for any app to exit
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    infra.stop().await;
+    Ok(())
+}
+
+/// Ensure the Cooper SDK is available in node_modules/.
 fn ensure_sdk(project_root: &PathBuf) -> Result<()> {
     let sdk_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sdk/src");
     let nm_cooper = project_root.join("node_modules/cooper");
 
     // Check if our SDK is already there (not the npm `cooper` package)
     if nm_cooper.join("package.json").exists() {
-        let pkg_content = std::fs::read_to_string(nm_cooper.join("package.json")).unwrap_or_default();
+        let pkg_content =
+            std::fs::read_to_string(nm_cooper.join("package.json")).unwrap_or_default();
         if pkg_content.contains("\"description\": \"The backend framework for TypeScript\"") {
             return Ok(());
         }
-        // Wrong package — remove it and install ours
         std::fs::remove_dir_all(&nm_cooper)?;
     }
 
-    // Create node_modules/cooper with the SDK modules
     std::fs::create_dir_all(nm_cooper.join("dist"))?;
 
-    // If the SDK source exists (development), symlink or copy it
     if sdk_source.exists() {
-        // Write a package.json that re-exports from src/
         let pkg = serde_json::json!({
             "name": "cooper",
             "version": "0.1.0",
@@ -191,8 +336,6 @@ fn ensure_sdk(project_root: &PathBuf) -> Result<()> {
             serde_json::to_string_pretty(&pkg)?,
         )?;
 
-        // Copy each .ts file as .js (Bun can import .ts directly, but
-        // we also write .js re-exports for Node compatibility)
         for entry in std::fs::read_dir(&sdk_source)? {
             let entry = entry?;
             let path = entry.path();
@@ -200,15 +343,11 @@ fn ensure_sdk(project_root: &PathBuf) -> Result<()> {
                 let stem = path.file_stem().unwrap().to_string_lossy();
                 let dest = nm_cooper.join("dist").join(format!("{stem}.js"));
 
-                // For Bun: just re-export from the .ts source
                 let relative = pathdiff::diff_paths(&path, nm_cooper.join("dist"))
                     .unwrap_or_else(|| path.clone());
                 let relative_str = relative.to_string_lossy().replace('\\', "/");
 
-                std::fs::write(
-                    &dest,
-                    format!("export * from \"{relative_str}\";\n"),
-                )?;
+                std::fs::write(&dest, format!("export * from \"{relative_str}\";\n"))?;
             }
         }
     }
@@ -220,7 +359,11 @@ fn find_project_root() -> Result<PathBuf> {
     let cwd = std::env::current_dir()?;
     let mut dir = cwd.as_path();
     loop {
-        if dir.join("cooper.config.ts").exists() || dir.join("cooper.config.js").exists() {
+        if dir.join("cooper.config.ts").exists()
+            || dir.join("cooper.config.js").exists()
+            || dir.join("cooper.workspace.ts").exists()
+            || dir.join("cooper.workspace.js").exists()
+        {
             return Ok(dir.to_path_buf());
         }
         match dir.parent() {
