@@ -81,40 +81,39 @@ install() {
     asset_name="cooper-${os}-${arch}.tar.gz"
   fi
 
-  auth_args=()
+  local auth_header=""
   if [ -n "${GITHUB_TOKEN:-}" ]; then
-    auth_args=(-H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/octet-stream")
+    auth_header="Authorization: token $GITHUB_TOKEN"
   fi
 
-  # Get download URL (handles private repos via release assets API)
+  # Get asset ID from release metadata (JSON)
   local release_url="https://api.github.com/repos/${REPO}/releases/tags/${version}"
-  local asset_url
+  local release_json
 
-  asset_url=$(curl -fsSL "${auth_args[@]}" "$release_url" \
-    | grep -o "\"browser_download_url\":[[:space:]]*\"[^\"]*${asset_name}\"" \
-    | cut -d'"' -f4)
+  release_json=$(curl -fsSL \
+    ${auth_header:+-H "$auth_header"} \
+    -H "Accept: application/vnd.github+json" \
+    "$release_url")
 
-  if [ -z "$asset_url" ]; then
-    # Fallback: try asset API for private repos
-    local asset_id
-    asset_id=$(curl -fsSL "${auth_args[@]}" "$release_url" \
-      | grep -B3 "\"name\": \"${asset_name}\"" \
-      | grep '"id"' | head -1 | grep -o '[0-9]*')
+  local asset_id
+  asset_id=$(echo "$release_json" \
+    | grep -B3 "\"name\": \"${asset_name}\"" \
+    | grep '"id"' | head -1 | grep -o '[0-9]*')
 
-    if [ -z "$asset_id" ]; then
-      err "Asset ${asset_name} not found in release ${version}"
-    fi
-
-    asset_url="https://api.github.com/repos/${REPO}/releases/assets/${asset_id}"
-    auth_args+=(-H "Accept: application/octet-stream")
+  if [ -z "$asset_id" ]; then
+    err "Asset ${asset_name} not found in release ${version}"
   fi
 
   local tmpdir
   tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' EXIT
+  trap 'rm -rf "${tmpdir:-}"' EXIT
 
   info "Downloading ${asset_name}..."
-  curl -fsSL "${auth_args[@]}" -o "${tmpdir}/${asset_name}" "$asset_url"
+  curl -fsSL -L \
+    ${auth_header:+-H "$auth_header"} \
+    -H "Accept: application/octet-stream" \
+    -o "${tmpdir}/${asset_name}" \
+    "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}"
 
   info "Extracting..."
   mkdir -p "$INSTALL_DIR"
