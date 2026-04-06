@@ -21,12 +21,14 @@ pub struct RuntimeServer {
 impl RuntimeServer {
     pub fn new(port: u16, project_root: PathBuf, analysis: ProjectAnalysis) -> Self {
         let js_runtime = JsRuntime::new(project_root.clone());
+        let (events_tx, _) = tokio::sync::broadcast::channel(256);
         Self {
             port,
             state: Arc::new(AppState {
                 analysis: RwLock::new(analysis),
                 js_runtime: RwLock::new(js_runtime),
                 project_root,
+                events_tx,
             }),
         }
     }

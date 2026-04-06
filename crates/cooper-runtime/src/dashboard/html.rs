@@ -47,6 +47,13 @@ pre.rs{background:#fafafa;border:1px solid #eee;padding:8px;white-space:pre-wrap
 .lc{min-width:30px;text-align:right;font-weight:bold}.lc.g{color:#000}.lc.y{color:#bbb}
 .ld{color:#ccc;min-width:44px;text-align:right}
 .f{border-top:1px solid #e0e0e0;margin-top:10px;padding-top:6px;color:#ccc;font-size:10px;display:flex;justify-content:space-between}
+.ef{background:none;border:1px solid #ddd;padding:3px 10px;font:inherit;font-size:10px;cursor:pointer;color:#aaa}
+.ef:hover{color:#000;border-color:#000}.ef.a{color:#000;border-color:#000;font-weight:bold}
+.ev{padding:3px 0;border-bottom:1px solid #f5f5f5;display:flex;gap:8px;font-size:11px}
+.ev .ek{min-width:50px;font-weight:bold;text-transform:uppercase;font-size:9px;padding:1px 4px;display:inline-block}
+.ek.pubsub{background:#e8f5e9;color:#2e7d32}.ek.queue{background:#e3f2fd;color:#1565c0}
+.ek.cron{background:#fff3e0;color:#e65100}.ek.request{background:#f3e5f5;color:#6a1b9a}
+.ev .et{color:#ccc;min-width:60px}.ev .ed{color:#666;flex:1}
 </style>
 </head>
 <body>
@@ -60,11 +67,25 @@ pre.rs{background:#fafafa;border:1px solid #eee;padding:8px;white-space:pre-wrap
   <button class="t" data-p="routes">Routes</button>
   <button class="t" data-p="api">Explorer</button>
   <button class="t" data-p="log">Log</button>
+  <button class="t" data-p="events">Events</button>
+  <button class="t" data-p="crons">Crons</button>
 </div>
 <div class="P a" id="map"><div id="gc"></div></div>
 <div class="P" id="routes"><table><thead><tr><th>method</th><th>path</th><th>handler</th><th>source</th><th></th></tr></thead><tbody id="rt"></tbody></table></div>
 <div class="P" id="api"><div class="ex"><div class="ep"><h3>Request</h3><div class="fl"><label>Route</label><select id="xr"></select></div><div class="fl"><label>Headers</label><input id="xh" placeholder="Authorization: Bearer ..."/></div><div class="fl"><label>Body</label><textarea id="xb" placeholder='{"name":"Alice"}'></textarea></div><button onclick="send()">Send</button></div><div class="ep"><h3>Response</h3><div class="sc" id="xs"></div><pre class="rs" id="xo">// send a request</pre></div></div></div>
 <div class="P" id="log"><div class="ls" id="ll"><span style="color:#ccc">watching...</span></div></div>
+<div class="P" id="events">
+  <div style="display:flex;gap:10px;margin-bottom:8px">
+    <button class="ef a" data-f="all" onclick="filterEvents('all',this)">All</button>
+    <button class="ef" data-f="pubsub" onclick="filterEvents('pubsub',this)">Pub/Sub</button>
+    <button class="ef" data-f="queue" onclick="filterEvents('queue',this)">Queues</button>
+  </div>
+  <div class="ls" id="el"><span style="color:#ccc">waiting for events...</span></div>
+</div>
+<div class="P" id="crons">
+  <table><thead><tr><th>name</th><th>status</th><th>duration</th><th>time</th></tr></thead><tbody id="ct"></tbody></table>
+  <div id="cn" style="color:#ccc;padding:8px;font-size:11px">waiting for cron executions...</div>
+</div>
 <div class="f"><span>cooper v0.4.0</span><span id="ft"></span></div>
 </div>
 <script>
@@ -280,6 +301,72 @@ let n=0;const si=setInterval(()=>{g.forEach((r,i)=>r.forEach((c,j)=>{if(T[i][j]!
 
 setInterval(async()=>{try{const r=await fetch(API+"/_cooper/health");if(!r.ok)throw 0}catch{}},5000);
 
+// SSE — live events from /_cooper/events
+let eventFilter="all";
+const allEvents=[];
+
+function connectSSE(){
+  const es=new EventSource(API+"/_cooper/events");
+  const handlers=["request","pubsub","queue","cron"];
+  handlers.forEach(type=>{
+    es.addEventListener(type,e=>{
+      try{const d=JSON.parse(e.data);handleEvent(d)}catch{}
+    });
+  });
+  es.onerror=()=>{setTimeout(connectSSE,3000)};
+}
+
+function handleEvent(ev){
+  allEvents.unshift(ev);
+  if(allEvents.length>500)allEvents.pop();
+
+  // Update live log tab
+  if(ev.kind==="request"){
+    addLog(ev.data.method,ev.data.path,ev.data.status,ev.data.duration_ms);
+  }
+
+  // Update events tab
+  renderEvents();
+
+  // Update crons tab
+  if(ev.kind==="cron"){
+    renderCronEntry(ev);
+  }
+}
+
+function renderEvents(){
+  const el=document.getElementById("el");
+  const filtered=eventFilter==="all"?allEvents:allEvents.filter(e=>e.kind===eventFilter);
+  if(!filtered.length){el.innerHTML='<span style="color:#ccc">waiting for events...</span>';return}
+  el.innerHTML=filtered.slice(0,200).map(ev=>{
+    const t=new Date(ev.ts).toLocaleTimeString("en-US",{hour12:false});
+    let detail="";
+    if(ev.kind==="request")detail=ev.data.method+" "+ev.data.path+" → "+ev.data.status+" ("+ev.data.duration_ms+"ms)";
+    else if(ev.kind==="pubsub")detail="topic: "+ev.data.topic+" → "+(ev.data.subscriber||"published");
+    else if(ev.kind==="queue")detail="queue: "+ev.data.queue+" — "+(ev.data.action||"processed");
+    else if(ev.kind==="cron")detail=ev.data.name+" — "+ev.data.status+" ("+ev.data.duration_ms+"ms)";
+    else detail=JSON.stringify(ev.data);
+    return '<div class="ev"><span class="et">'+t+'</span><span class="ek '+ev.kind+'">'+ev.kind+'</span><span class="ed">'+detail+'</span></div>';
+  }).join("");
+}
+
+function filterEvents(f,btn){
+  eventFilter=f;
+  document.querySelectorAll(".ef").forEach(b=>b.classList.remove("a"));
+  btn.classList.add("a");
+  renderEvents();
+}
+
+function renderCronEntry(ev){
+  const cn=document.getElementById("cn");
+  if(cn)cn.style.display="none";
+  const ct=document.getElementById("ct");
+  const t=new Date(ev.ts).toLocaleTimeString("en-US",{hour12:false});
+  const ok=ev.data.status==="ok";
+  ct.innerHTML='<tr><td class="b">'+ev.data.name+'</td><td style="color:'+(ok?"#2e7d32":"#c62828")+'">'+(ok?"✓ ok":"✗ error")+'</td><td class="d">'+ev.data.duration_ms+'ms</td><td class="d">'+t+'</td></tr>'+ct.innerHTML;
+}
+
+connectSSE();
 load();
 </script>
 </body>

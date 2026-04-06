@@ -8,15 +8,42 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, delete, get, patch, post, put};
 use axum::Router;
 use cooper_codegen::analyzer::{PageInfo, ProjectAnalysis, RouteInfo, StreamKind};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use futures::stream::Stream;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 
 pub struct AppState {
     pub analysis: RwLock<ProjectAnalysis>,
     pub js_runtime: RwLock<JsRuntime>,
     pub project_root: std::path::PathBuf,
+    /// Broadcast channel for dashboard live events (pub/sub, queue, cron, requests).
+    pub events_tx: broadcast::Sender<DashboardEvent>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DashboardEvent {
+    /// Event type: "pubsub", "queue", "cron", "request"
+    pub kind: String,
+    /// JSON payload with event-specific data
+    pub data: Value,
+    /// Timestamp in milliseconds
+    pub ts: u64,
+}
+
+impl DashboardEvent {
+    pub fn now(kind: &str, data: Value) -> Self {
+        Self {
+            kind: kind.to_string(),
+            data,
+            ts: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        }
+    }
 }
 
 /// Build an axum Router from the analyzed project
@@ -150,6 +177,19 @@ pub fn build_router(state: Arc<AppState>, analysis: &ProjectAnalysis) -> Router 
         }),
     );
 
+    // SSE endpoint for dashboard live events
+    let events_state = Arc::clone(&state);
+    router = router.route(
+        "/_cooper/events",
+        get(move || {
+            let state = Arc::clone(&events_state);
+            async move {
+                let rx = state.events_tx.subscribe();
+                Sse::new(sse_stream(rx)).keep_alive(KeepAlive::default())
+            }
+        }),
+    );
+
     // SSR page routes — serve HTML (skip pages that conflict with API routes)
     let api_get_paths: std::collections::HashSet<String> = analysis
         .routes
@@ -258,6 +298,7 @@ async fn handle_request(
     }
 
     // Execute via JS runtime
+    let t0 = std::time::Instant::now();
     let runtime = state.js_runtime.read().await;
     match runtime
         .call_handler_with_auth(
@@ -269,12 +310,21 @@ async fn handle_request(
         )
         .await
     {
-        Ok(result) => (
-            StatusCode::OK,
-            [("content-type", "application/json")],
-            result,
-        )
-            .into_response(),
+        Ok(result) => {
+            let dur_ms = t0.elapsed().as_millis() as u64;
+            let _ = state.events_tx.send(DashboardEvent::now("request", serde_json::json!({
+                "method": route.method,
+                "path": route.path,
+                "status": 200,
+                "duration_ms": dur_ms,
+            })));
+            (
+                StatusCode::OK,
+                [("content-type", "application/json")],
+                result,
+            )
+                .into_response()
+        }
         Err(e) => {
             let err_str = e.to_string();
             // Try to parse as a Cooper structured error
@@ -366,6 +416,18 @@ fn cooper_path_to_axum(path: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("/")
+}
+
+fn sse_stream(
+    mut rx: broadcast::Receiver<DashboardEvent>,
+) -> impl Stream<Item = Result<Event, std::convert::Infallible>> {
+    async_stream::stream! {
+        while let Ok(event) = rx.recv().await {
+            if let Ok(json) = serde_json::to_string(&event) {
+                yield Ok(Event::default().event(&event.kind).data(json));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
