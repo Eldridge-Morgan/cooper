@@ -1,12 +1,13 @@
 use crate::error::{CooperError, ErrorCode};
 use crate::js::JsRuntime;
+use crate::ssr::renderer::SsrRenderer;
 use axum::body::Body;
 use axum::extract::Path;
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
-use cooper_codegen::analyzer::{ProjectAnalysis, RouteInfo};
+use cooper_codegen::analyzer::{PageInfo, ProjectAnalysis, RouteInfo};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -99,6 +100,28 @@ pub fn build_router(state: Arc<AppState>, analysis: &ProjectAnalysis) -> Router 
             }
         }),
     );
+
+    // SSR page routes — serve HTML
+    for page in &analysis.pages {
+        if page.has_layout {
+            continue; // Layouts are not routable
+        }
+
+        let axum_path = cooper_path_to_axum(&page.route);
+        let page_info = page.clone();
+
+        let handler = {
+            let state = Arc::clone(&state);
+            let info = page_info.clone();
+            move |path_params: Option<Path<HashMap<String, String>>>| {
+                let state = Arc::clone(&state);
+                let info = info.clone();
+                async move { handle_page(state, info, path_params).await }
+            }
+        };
+
+        router = router.route(&axum_path, get(handler));
+    }
 
     router.with_state(())
 }
@@ -202,6 +225,40 @@ async fn handle_request(
                 }
             }
             CooperError::new(ErrorCode::Internal, format!("Handler error: {e}")).into_response()
+        }
+    }
+}
+
+async fn handle_page(
+    state: Arc<AppState>,
+    page: PageInfo,
+    path_params: Option<Path<HashMap<String, String>>>,
+) -> Response {
+    let params = path_params.map(|Path(p)| p).unwrap_or_default();
+
+    let runtime = state.js_runtime.read().await;
+    match SsrRenderer::render_page(&runtime, &page.source_file, &params).await {
+        Ok(html) => (
+            StatusCode::OK,
+            [("content-type", "text/html; charset=utf-8")],
+            html,
+        )
+            .into_response(),
+        Err(e) => {
+            let error_html = format!(
+                r#"<!DOCTYPE html>
+<html><body>
+<h1>Render Error</h1>
+<pre>{}</pre>
+</body></html>"#,
+                e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [("content-type", "text/html; charset=utf-8")],
+                error_html,
+            )
+                .into_response()
         }
     }
 }

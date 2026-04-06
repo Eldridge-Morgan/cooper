@@ -1,6 +1,8 @@
 pub mod cloud;
 pub mod diff;
+pub mod providers;
 pub mod provisioner;
+pub mod state;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -20,12 +22,15 @@ impl CloudProvider {
             "gcp" => Ok(Self::Gcp),
             "azure" => Ok(Self::Azure),
             "fly" => Ok(Self::Fly),
-            _ => Err(anyhow::anyhow!("Unknown cloud provider: {}. Use aws, gcp, azure, or fly.", s)),
+            _ => Err(anyhow::anyhow!(
+                "Unknown cloud provider: {}. Use aws, gcp, azure, or fly.",
+                s
+            )),
         }
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeployPlan {
     pub creates: Vec<ResourceChange>,
     pub updates: Vec<ResourceChange>,
@@ -33,10 +38,27 @@ pub struct DeployPlan {
     pub estimated_monthly_cost: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceChange {
     pub resource_type: String,
     pub name: String,
     pub detail: String,
     pub estimated_cost: Option<f64>,
+}
+
+/// Result of a deployment — connection info for all provisioned resources.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeployResult {
+    pub env: String,
+    pub provider: String,
+    pub url: Option<String>,
+    pub resources: Vec<ProvisionedResource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProvisionedResource {
+    pub resource_type: String,
+    pub name: String,
+    pub status: String,
+    pub connection_info: Option<String>,
 }
