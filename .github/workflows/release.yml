@@ -1,0 +1,206 @@
+name: Release – Cross-Platform Binaries
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.5.0)"
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: cooper-linux-x86_64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: cooper-linux-arm64
+          - target: x86_64-apple-darwin
+            os: macos-13
+            name: cooper-darwin-x86_64
+          - target: aarch64-apple-darwin
+            os: macos-14
+            name: cooper-darwin-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: cooper-windows-x86_64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} --bin cooper
+
+      - name: Package binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../${{ matrix.name }}.tar.gz cooper
+          cd ../../..
+          shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
+
+      - name: Package binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target/${{ matrix.target }}/release/cooper.exe" -DestinationPath "${{ matrix.name }}.zip"
+          (Get-FileHash "${{ matrix.name }}.zip" -Algorithm SHA256).Hash.ToLower() + "  ${{ matrix.name }}.zip" | Out-File -Encoding ascii "${{ matrix.name }}.zip.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            ${{ matrix.name }}.tar.gz
+            ${{ matrix.name }}.tar.gz.sha256
+            ${{ matrix.name }}.zip
+            ${{ matrix.name }}.zip.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.version }}
+          name: Cooper ${{ steps.tag.outputs.version }}
+          generate_release_notes: true
+          files: |
+            artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-npm-binaries:
+    needs: release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: cooper-darwin-arm64
+            pkg: "@eldridge-morgan/cooper-darwin-arm64"
+            os: darwin
+            cpu: arm64
+          - target: cooper-darwin-x86_64
+            pkg: "@eldridge-morgan/cooper-darwin-x64"
+            os: darwin
+            cpu: x64
+          - target: cooper-linux-x86_64
+            pkg: "@eldridge-morgan/cooper-linux-x64"
+            os: linux
+            cpu: x64
+          - target: cooper-linux-arm64
+            pkg: "@eldridge-morgan/cooper-linux-arm64"
+            os: linux
+            cpu: arm64
+          - target: cooper-windows-x86_64
+            pkg: "@eldridge-morgan/cooper-win32-x64"
+            os: win32
+            cpu: x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@eldridge-morgan"
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.tag }}"
+          else
+            V="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${V#v}" >> $GITHUB_OUTPUT
+
+      - name: Build platform npm package
+        run: |
+          mkdir -p pkg/bin
+          if [[ "${{ matrix.os }}" == "win32" ]]; then
+            unzip ${{ matrix.target }}.zip -d pkg/bin/
+            BIN=cooper.exe
+          else
+            tar xzf ${{ matrix.target }}.tar.gz -C pkg/bin/
+            chmod +x pkg/bin/cooper
+            BIN=cooper
+          fi
+
+          cat > pkg/package.json << EOF
+          {
+            "name": "${{ matrix.pkg }}",
+            "version": "${{ steps.ver.outputs.version }}",
+            "description": "Cooper CLI binary for ${{ matrix.os }}-${{ matrix.cpu }}",
+            "os": ["${{ matrix.os }}"],
+            "cpu": ["${{ matrix.cpu }}"],
+            "main": "bin/${BIN}",
+            "files": ["bin/"],
+            "repository": {
+              "type": "git",
+              "url": "https://github.com/Eldridge-Morgan/cooper"
+            },
+            "license": "Apache-2.0"
+          }
+          EOF
+
+      - name: Publish platform package
+        run: cd pkg && npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

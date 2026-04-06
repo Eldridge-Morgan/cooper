@@ -1,0 +1,44 @@
+name: CLI – Publish npm wrapper
+
+on:
+  workflow_run:
+    workflows: ["Release – Cross-Platform Binaries"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-wrapper:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@eldridge-morgan"
+
+      - name: Sync version from Cargo.toml
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          cd npm/cooper-cli
+          node -e "
+            const pkg = require('./package.json');
+            pkg.version = '${VERSION}';
+            for (const [k, v] of Object.entries(pkg.optionalDependencies || {})) {
+              pkg.optionalDependencies[k] = '${VERSION}';
+            }
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          echo "Publishing @eldridge-morgan/cooper-cli@${VERSION}"
+
+      - name: Publish wrapper package
+        run: cd npm/cooper-cli && npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

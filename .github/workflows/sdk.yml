@@ -1,0 +1,53 @@
+name: SDK – Build & Publish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdk/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@eldridge-morgan"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build SDK
+        run: npm run build
+
+      - name: Verify dist output
+        run: |
+          test -f dist/index.js || (echo "Build failed: dist/index.js missing" && exit 1)
+          echo "Build output:"
+          ls -lh dist/
+
+      - name: Set scoped package name
+        run: |
+          node -e "
+            const pkg = require('./package.json');
+            pkg.name = '@eldridge-morgan/cooper';
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Publish to GitHub Packages
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

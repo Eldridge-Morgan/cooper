@@ -1,0 +1,23 @@
+{
+  "name": "@eldridge-morgan/cooper-cli",
+  "version": "0.1.0",
+  "description": "Cooper CLI — the backend framework for TypeScript",
+  "bin": {
+    "cooper": "bin/cooper"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "optionalDependencies": {
+    "@eldridge-morgan/cooper-darwin-arm64": "0.1.0",
+    "@eldridge-morgan/cooper-darwin-x64": "0.1.0",
+    "@eldridge-morgan/cooper-linux-x64": "0.1.0",
+    "@eldridge-morgan/cooper-linux-arm64": "0.1.0",
+    "@eldridge-morgan/cooper-win32-x64": "0.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Eldridge-Morgan/cooper"
+  },
+  "license": "Apache-2.0"
+}
