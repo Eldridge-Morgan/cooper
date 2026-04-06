@@ -1,7 +1,7 @@
 # cooper/api
 
 ```ts
-import { api } from "cooper/api";
+import { api } from "cooper-stack/api";
 ```
 
 ## `api(config, handler)`

@@ -5,7 +5,7 @@ Register an auth handler once. It runs automatically on every route with `auth: 
 ## Auth handler
 
 ```ts
-import { authHandler } from "cooper/auth";
+import { authHandler } from "cooper-stack/auth";
 
 export const auth = authHandler(async (token: string) => {
   const payload = await verifyJWT(token);

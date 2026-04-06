@@ -39,3 +39,30 @@ Every error returns the same shape:
   }
 }
 ```
+
+## Rate limiting and Retry-After
+
+When a `RATE_LIMITED` error is thrown, Cooper automatically includes a `Retry-After` header in the HTTP response. You can specify the delay (in seconds) using the `retryAfter` field:
+
+```ts
+throw new CooperError("RATE_LIMITED", "Slow down", { retryAfter: 30 });
+```
+
+This produces:
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 30
+```
+
+```json
+{
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "Slow down",
+    "retryAfter": 30
+  }
+}
+```
+
+If `retryAfter` is omitted, Cooper defaults to `60` seconds.

@@ -5,7 +5,7 @@ Cooper uses [Zod](https://zod.dev) for request validation. Invalid requests neve
 ## Setup
 
 ```ts
-import { api } from "cooper/api";
+import { api } from "cooper-stack/api";
 import { z } from "zod";
 
 const CreateUserSchema = z.object({

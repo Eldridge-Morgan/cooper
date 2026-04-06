@@ -14,7 +14,7 @@ pages/
 ```
 
 ```tsx
-import { page } from "cooper/ssr";
+import { page } from "cooper-stack/ssr";
 
 export default page(async ({ params }) => {
   const user = await UsersService.getUser({ id: params.id });
@@ -30,7 +30,7 @@ export default page(async ({ params }) => {
 ## Layouts
 
 ```tsx
-import { layout } from "cooper/ssr";
+import { layout } from "cooper-stack/ssr";
 
 export default layout(({ children }) => (
   <div>
@@ -44,7 +44,7 @@ export default layout(({ children }) => (
 ## Data loading
 
 ```tsx
-import { page, pageLoader } from "cooper/ssr";
+import { page, pageLoader } from "cooper-stack/ssr";
 
 export const loader = pageLoader(async ({ params }) => {
   const user = await UsersService.getUser({ id: params.id });

@@ -3,7 +3,7 @@
 Secrets fetched at runtime — never in `.env`, never in source code.
 
 ```ts
-import { secret } from "cooper/secrets";
+import { secret } from "cooper-stack/secrets";
 
 const stripeKey = secret("stripe-api-key");
 

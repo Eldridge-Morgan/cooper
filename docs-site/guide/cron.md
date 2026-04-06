@@ -3,7 +3,7 @@
 Scheduled tasks with human-readable or standard cron syntax.
 
 ```ts
-import { cron } from "cooper/cron";
+import { cron } from "cooper-stack/cron";
 
 export const cleanup = cron("cleanup", {
   schedule: "every 1 hour",
