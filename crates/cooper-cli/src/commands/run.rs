@@ -305,6 +305,17 @@ fn ensure_sdk(project_root: &PathBuf) -> Result<()> {
         std::fs::remove_dir_all(&nm_cooper)?;
     }
 
+    // Check if the scoped package is installed (@eldridge-morgan/cooper)
+    let scoped_path = project_root.join("node_modules/@eldridge-morgan/cooper");
+    if scoped_path.join("package.json").exists() {
+        // Symlink node_modules/cooper -> @eldridge-morgan/cooper so the bridge resolves
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&scoped_path, &nm_cooper)?;
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&scoped_path, &nm_cooper)?;
+        return Ok(());
+    }
+
     std::fs::create_dir_all(nm_cooper.join("dist"))?;
 
     if sdk_source.exists() {

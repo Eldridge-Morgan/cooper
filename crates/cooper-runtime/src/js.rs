@@ -208,13 +208,21 @@ impl JsRuntime {
 
     fn resolve_bridge_path(&self) -> Result<PathBuf> {
         // Look for the bridge in several places:
-        // 1. node_modules/cooper/dist/bridge.js (installed SDK)
-        // 2. Bundled alongside the cooper binary
+        // 1. node_modules/cooper/dist/bridge.js (unscoped SDK)
+        // 2. node_modules/@eldridge-morgan/cooper/dist/bridge.js (scoped SDK)
+        // 3. Bundled alongside the cooper binary
         let nm_path = self
             .project_root
             .join("node_modules/cooper/dist/bridge.js");
         if nm_path.exists() {
             return Ok(nm_path);
+        }
+
+        let scoped_path = self
+            .project_root
+            .join("node_modules/@eldridge-morgan/cooper/dist/bridge.js");
+        if scoped_path.exists() {
+            return Ok(scoped_path);
         }
 
         // Fallback: bundled bridge next to the binary
