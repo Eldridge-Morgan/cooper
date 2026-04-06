@@ -314,9 +314,15 @@ async fn run_workspace(root: PathBuf, base_port: u16) -> Result<()> {
 /// Ensure the Cooper SDK is available in node_modules/.
 fn ensure_sdk(project_root: &PathBuf) -> Result<()> {
     let sdk_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../sdk/src");
-    let nm_cooper = project_root.join("node_modules/cooper");
 
-    // Check if our SDK is already there (not the npm `cooper` package)
+    // Check if cooper-stack (public npm) is installed — preferred
+    let nm_stack = project_root.join("node_modules/cooper-stack");
+    if nm_stack.join("package.json").exists() {
+        return Ok(());
+    }
+
+    // Check if cooper (legacy) is already there
+    let nm_cooper = project_root.join("node_modules/cooper");
     if nm_cooper.join("package.json").exists() {
         let pkg_content =
             std::fs::read_to_string(nm_cooper.join("package.json")).unwrap_or_default();
@@ -329,7 +335,6 @@ fn ensure_sdk(project_root: &PathBuf) -> Result<()> {
     // Check if the scoped package is installed (@eldridge-morgan/cooper)
     let scoped_path = project_root.join("node_modules/@eldridge-morgan/cooper");
     if scoped_path.join("package.json").exists() {
-        // Symlink node_modules/cooper -> @eldridge-morgan/cooper so the bridge resolves
         #[cfg(unix)]
         std::os::unix::fs::symlink(&scoped_path, &nm_cooper)?;
         #[cfg(windows)]

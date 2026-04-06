@@ -46,7 +46,7 @@ jobs:
             pkg.version = '${VERSION}';
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
-          echo "Publishing cooper@${VERSION}"
+          echo "Publishing cooper-stack@${VERSION}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

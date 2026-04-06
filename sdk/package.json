@@ -1,5 +1,5 @@
 {
-  "name": "cooper",
+  "name": "cooper-stack",
   "version": "0.1.0",
   "description": "The backend framework for TypeScript",
   "type": "module",

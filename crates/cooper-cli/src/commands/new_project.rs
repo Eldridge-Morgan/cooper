@@ -28,7 +28,7 @@ pub async fn run(name: &str, _template: &str) -> Result<()> {
     fs::write(
         project_dir.join("cooper.config.ts"),
         format!(
-            r#"import {{ secret }} from "cooper/secrets";
+            r#"import {{ secret }} from "cooper-stack/secrets";
 
 export default {{
   name: "{}",
@@ -67,7 +67,7 @@ export default {{
     "deploy": "cooper deploy"
   }},
   "dependencies": {{
-    "cooper": "latest",
+    "cooper-stack": "latest",
     "zod": "^3.23"
   }},
   "devDependencies": {{
@@ -108,11 +108,11 @@ export default {{
     // Users service — full example with CRUD, auth, validation, middleware
     fs::write(
         project_dir.join("services/users/api.ts"),
-        r#"import { api } from "cooper/api";
-import { CooperError } from "cooper";
-import { database } from "cooper/db";
-import { cache } from "cooper/cache";
-import { topic } from "cooper/pubsub";
+        r#"import { api } from "cooper-stack/api";
+import { CooperError } from "cooper-stack";
+import { database } from "cooper-stack/db";
+import { cache } from "cooper-stack/cache";
+import { topic } from "cooper-stack/pubsub";
 import { z } from "zod";
 
 // Database
@@ -212,7 +212,7 @@ export const deleteUser = api(
     // Health service
     fs::write(
         project_dir.join("services/health/api.ts"),
-        r#"import { api } from "cooper/api";
+        r#"import { api } from "cooper-stack/api";
 
 export const healthCheck = api(
   { method: "GET", path: "/health" },
@@ -230,9 +230,9 @@ export const healthCheck = api(
     // Auth handler
     fs::write(
         project_dir.join("services/auth.ts"),
-        r#"import { authHandler } from "cooper/auth";
-import { api } from "cooper/api";
-import { CooperError } from "cooper";
+        r#"import { authHandler } from "cooper-stack/auth";
+import { api } from "cooper-stack/api";
+import { CooperError } from "cooper-stack";
 
 // Register the auth handler — called for every route with auth: true
 export const auth = authHandler(async (token: string) => {
@@ -269,7 +269,7 @@ export const onUserCreated = UserCreated.subscribe("send-welcome", {
     // Cron job example
     fs::write(
         project_dir.join("services/cleanup.ts"),
-        r#"import { cron } from "cooper/cron";
+        r#"import { cron } from "cooper-stack/cron";
 
 export const sessionCleanup = cron("session-cleanup", {
   schedule: "every 1 hour",
@@ -296,7 +296,7 @@ export const sessionCleanup = cron("session-cleanup", {
     // Example page
     fs::write(
         project_dir.join("pages/index.tsx"),
-        r#"import { page } from "cooper/ssr";
+        r#"import { page } from "cooper-stack/ssr";
 
 export default page(async () => {
   return (
