@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::{Child, Command};
 
+use super::binaries::resolve_binary;
+
 /// Manages embedded infrastructure for local development.
 pub struct EmbeddedInfra {
     pub pg_port: u16,
@@ -164,7 +166,7 @@ impl EmbeddedInfra {
     }
 
     async fn start_nats(&mut self) -> Result<u16> {
-        let nats_binary = find_binary("nats-server")?;
+        let nats_binary = resolve_binary("nats-server").await?;
         let port = find_free_port().await?;
         let store_dir = self.data_dir.join("nats");
         std::fs::create_dir_all(&store_dir)?;
@@ -190,9 +192,11 @@ impl EmbeddedInfra {
     }
 
     async fn start_valkey(&mut self) -> Result<u16> {
-        // Try valkey-server first, then redis-server
-        let binary = find_binary("valkey-server")
-            .or_else(|_| find_binary("redis-server"))?;
+        // Try valkey-server first, then redis-server (check PATH, then auto-download)
+        let binary = match resolve_binary("valkey-server").await {
+            Ok(b) => b,
+            Err(_) => find_binary("redis-server")?,
+        };
         let port = find_free_port().await?;
         let data_dir = self.data_dir.join("valkey");
         std::fs::create_dir_all(&data_dir)?;

@@ -24,3 +24,8 @@ uuid.workspace = true
 chrono.workspace = true
 which.workspace = true
 futures.workspace = true
+reqwest.workspace = true
+flate2 = "1"
+tar = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tempfile = "3"
