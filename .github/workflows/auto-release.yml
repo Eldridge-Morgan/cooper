@@ -1,0 +1,72 @@
+name: Auto Release on Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    if: github.event.pull_request.merged == true
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest tag
+        id: latest
+        run: |
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Latest tag: $TAG"
+
+      - name: Bump version
+        id: bump
+        run: |
+          CURRENT="${{ steps.latest.outputs.tag }}"
+          CURRENT="${CURRENT#v}"
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          PR_TITLE="${{ github.event.pull_request.title }}"
+
+          # Major: title starts with "breaking:" or "major:"
+          # Minor: title starts with "feat:" or "feature:"
+          # Patch: everything else (fix, chore, docs, refactor, etc.)
+          if echo "$PR_TITLE" | grep -qiE '^(breaking|major):'; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif echo "$PR_TITLE" | grep -qiE '^(feat|feature):'; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "Bumping ${{ steps.latest.outputs.tag }} → $NEW_VERSION"
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.bump.outputs.version }}" -m "Release ${{ steps.bump.outputs.version }}"
+          git push origin "${{ steps.bump.outputs.version }}"
+
+      - name: Summary
+        run: |
+          echo "## Release ${{ steps.bump.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR:** #${{ github.event.pull_request.number }} — ${{ github.event.pull_request.title }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous:** ${{ steps.latest.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **New tag:** ${{ steps.bump.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The [Release workflow](https://github.com/Eldridge-Morgan/cooper/actions/workflows/release.yml) will now build cross-platform binaries." >> $GITHUB_STEP_SUMMARY
