@@ -24,9 +24,10 @@ jobs:
           registry-url: "https://npm.pkg.github.com"
           scope: "@eldridge-morgan"
 
-      - name: Sync version from Cargo.toml
+      - name: Sync version from latest release tag
         run: |
-          VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          TAG=$(gh release view --json tagName -q .tagName)
+          VERSION="${TAG#v}"
           cd npm/cooper-cli
           node -e "
             const pkg = require('./package.json');
@@ -37,6 +38,8 @@ jobs:
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
           echo "Publishing @eldridge-morgan/cooper-cli@${VERSION}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish wrapper package
         run: cd npm/cooper-cli && npm publish
