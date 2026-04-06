@@ -19,7 +19,8 @@
     "./queue": "./dist/queue.js",
     "./ssr": "./dist/ssr.js",
     "./islands": "./dist/islands.js",
-    "./ai": "./dist/ai.js"
+    "./ai": "./dist/ai.js",
+    "./rateLimit": "./dist/rateLimit.js"
   },
   "scripts": {
     "build": "tsc",

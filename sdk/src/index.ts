@@ -13,4 +13,5 @@ export { queue, type QueueClient } from "./queue.js";
 export { page, layout, pageLoader, Suspense } from "./ssr.js";
 export { island } from "./islands.js";
 export { vectorStore, llmGateway } from "./ai.js";
+export { rateLimit, type RateLimitConfig } from "./rateLimit.js";
 export { registry } from "./registry.js";
