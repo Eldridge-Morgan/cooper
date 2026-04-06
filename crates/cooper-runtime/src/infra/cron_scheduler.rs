@@ -31,20 +31,20 @@ impl CronScheduler {
     }
 
     /// Start the cron scheduler in the background.
-    pub fn start(&self, js_runtime: Arc<RwLock<crate::js::JsRuntime>>) {
+    pub fn start(&self, state: Arc<crate::router::AppState>) {
         for job in &self.jobs {
             let interval = job.interval_ms;
             let source = job.info.source_file.clone();
             let export = job.info.export_name.clone();
             let name = job.info.name.clone();
-            let runtime = Arc::clone(&js_runtime);
+            let state = Arc::clone(&state);
 
             tokio::spawn(async move {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_millis(interval)).await;
                     tracing::info!("Running cron job: {}", name);
 
-                    let rt = runtime.read().await;
+                    let rt = state.js_runtime.read().await;
                     if let Err(e) = rt.call_cron(&source, &export).await {
                         tracing::error!("Cron job '{}' failed: {}", name, e);
                     }

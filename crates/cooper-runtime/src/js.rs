@@ -10,7 +10,10 @@ use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, oneshot};
 
 /// Number of JS worker processes to spawn
-const WORKER_POOL_SIZE: usize = 4;
+// Single worker in dev mode — ensures pub/sub subscribers, queue handlers,
+// and in-memory state are consistent within one process.
+// TODO: scale to multiple workers with shared event bus for production.
+const WORKER_POOL_SIZE: usize = 1;
 
 #[derive(Debug, Serialize)]
 struct RpcRequest {

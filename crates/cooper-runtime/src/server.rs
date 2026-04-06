@@ -31,6 +31,10 @@ impl RuntimeServer {
         }
     }
 
+    pub fn state(&self) -> &Arc<AppState> {
+        &self.state
+    }
+
     pub async fn start(&self) -> Result<()> {
         // Start JS worker pool
         {

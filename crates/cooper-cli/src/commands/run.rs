@@ -105,6 +105,8 @@ async fn run_single_app(project_root: PathBuf, port: u16) -> Result<()> {
             "⏰".to_string(),
             analysis.crons.len()
         );
+        let scheduler = cooper_runtime::infra::cron_scheduler::CronScheduler::new(&analysis.crons);
+        scheduler.start(Arc::clone(server.state()));
     }
 
     // Phase 6: File watcher for hot reload

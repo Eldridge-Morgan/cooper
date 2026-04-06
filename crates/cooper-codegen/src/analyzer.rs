@@ -274,7 +274,7 @@ fn extract_topics(source: &str, source_file: &str, analysis: &mut ProjectAnalysi
 
 fn extract_databases(source: &str, source_file: &str, analysis: &mut ProjectAnalysis) {
     let re = Regex::new(
-        r#"export\s+const\s+(\w+)\s*=\s*database\s*\(\s*"([^"]+)"(?:\s*,\s*\{([^}]*)\})?"#
+        r#"(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*database\s*\(\s*"([^"]+)"(?:\s*,\s*\{([^}]*)\})?"#
     ).unwrap();
 
     for cap in re.captures_iter(source) {

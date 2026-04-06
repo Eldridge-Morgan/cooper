@@ -185,7 +185,22 @@ pub fn build_router(state: Arc<AppState>, analysis: &ProjectAnalysis) -> Router 
         router = router.route(&axum_path, get(handler));
     }
 
-    router.with_state(())
+    // 404 fallback — return JSON error for unknown routes
+    async fn not_found_handler() -> impl IntoResponse {
+        (
+            StatusCode::NOT_FOUND,
+            axum::response::Json(serde_json::json!({
+                "error": {
+                    "code": "NOT_FOUND",
+                    "message": "Route not found"
+                }
+            })),
+        )
+    }
+
+    router
+        .fallback(not_found_handler)
+        .with_state(())
 }
 
 async fn handle_request(
