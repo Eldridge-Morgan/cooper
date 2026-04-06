@@ -67,7 +67,7 @@ export default {{
     "deploy": "cooper deploy"
   }},
   "dependencies": {{
-    "cooper": "latest",
+    "@eldridge-morgan/cooper": "latest",
     "zod": "^3.23"
   }},
   "devDependencies": {{
@@ -326,6 +326,14 @@ export default page(async () => {
   created_at: string;
   updated_at: string;
 }
+"#,
+    )?;
+
+    // .npmrc — GitHub Packages registry for scoped packages
+    fs::write(
+        project_dir.join(".npmrc"),
+        r#"@eldridge-morgan:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
 "#,
     )?;
 
