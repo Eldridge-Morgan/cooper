@@ -39,13 +39,19 @@ jobs:
           echo "Build output:"
           ls -lh dist/
 
-      - name: Set scoped package name
+      - name: Set scoped name and version from latest release
         run: |
+          TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "v0.1.0")
+          VERSION="${TAG#v}"
           node -e "
             const pkg = require('./package.json');
             pkg.name = '@eldridge-morgan/cooper';
+            pkg.version = '${VERSION}';
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
+          echo "Publishing @eldridge-morgan/cooper@${VERSION}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to GitHub Packages
         run: npm publish
