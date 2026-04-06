@@ -23,6 +23,7 @@ const STATUS_MAP: Record<ErrorCode, number> = {
 export class CooperError extends Error {
   public readonly code: ErrorCode;
   public readonly statusCode: number;
+  public retryAfter?: number;
 
   constructor(code: ErrorCode, message: string) {
     super(message);
@@ -36,6 +37,7 @@ export class CooperError extends Error {
       error: {
         code: this.code,
         message: this.message,
+        ...(this.retryAfter !== undefined && { retryAfter: this.retryAfter }),
       },
     };
   }

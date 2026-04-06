@@ -293,12 +293,26 @@ async fn handle_request(
                         "VALIDATION_FAILED" => StatusCode::UNPROCESSABLE_ENTITY,
                         _ => StatusCode::INTERNAL_SERVER_ERROR,
                     };
-                    return (
+                    // Add Retry-After header for rate-limited responses
+                    let retry_after = error_obj
+                        .get("retryAfter")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v.to_string());
+
+                    let mut response = (
                         status,
                         [("content-type", "application/json")],
                         err_str,
                     )
                         .into_response();
+
+                    if let Some(retry) = retry_after {
+                        if let Ok(val) = retry.parse() {
+                            response.headers_mut().insert("retry-after", val);
+                        }
+                    }
+
+                    return response;
                 }
             }
             CooperError::new(ErrorCode::Internal, format!("Handler error: {e}")).into_response()
