@@ -119,6 +119,64 @@ export async function ensureStream(
 }
 
 /**
+ * Ensure a JetStream stream exists for a job queue.
+ * Uses WorkQueue retention — each message consumed by exactly one worker.
+ */
+export async function ensureQueueStream(
+  queueName: string,
+  config?: { dedup?: boolean }
+): Promise<void> {
+  if (!jsm) return;
+
+  const name = "QUEUE_" + queueName.replace(/[^a-zA-Z0-9_-]/g, "_").toUpperCase();
+  const subject = `cooper.queue.${queueName}`;
+
+  try {
+    await jsm.streams.info(name);
+  } catch {
+    await jsm.streams.add({
+      name,
+      subjects: [subject],
+      retention: RetentionPolicy.Workqueue,
+      max_msgs: -1,
+      max_bytes: -1,
+      max_age: 7 * 24 * 60 * 60 * 1_000_000_000, // 7 days in nanos
+      storage: StorageType.File,
+      num_replicas: 1,
+      duplicate_window: config?.dedup
+        ? 5 * 60 * 1_000_000_000 // 5 min dedup window for queues
+        : 0,
+    });
+  }
+}
+
+/**
+ * Ensure a JetStream stream exists for a dead-letter queue.
+ * Uses Limits retention — messages stay until explicitly purged.
+ */
+export async function ensureDLQStream(dlqName: string): Promise<void> {
+  if (!jsm) return;
+
+  const name = "DLQ_" + dlqName.replace(/[^a-zA-Z0-9_-]/g, "_").toUpperCase();
+  const subject = `cooper.dlq.${dlqName}`;
+
+  try {
+    await jsm.streams.info(name);
+  } catch {
+    await jsm.streams.add({
+      name,
+      subjects: [subject],
+      retention: RetentionPolicy.Limits,
+      max_msgs: 10000,
+      max_bytes: -1,
+      max_age: 30 * 24 * 60 * 60 * 1_000_000_000, // 30 days
+      storage: StorageType.File,
+      num_replicas: 1,
+    });
+  }
+}
+
+/**
  * Graceful shutdown — drain and close the connection.
  */
 export async function closeNats(): Promise<void> {
