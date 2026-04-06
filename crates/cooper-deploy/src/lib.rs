@@ -2,6 +2,7 @@ pub mod cloud;
 pub mod diff;
 pub mod providers;
 pub mod provisioner;
+pub mod scheduler;
 pub mod state;
 
 use anyhow::Result;

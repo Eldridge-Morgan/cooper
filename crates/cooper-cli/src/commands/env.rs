@@ -2,6 +2,20 @@ use anyhow::Result;
 use colored::Colorize;
 
 pub async fn ls() -> Result<()> {
+    // Check for expired environments and destroy them
+    match cooper_deploy::scheduler::check_expired_environments().await {
+        Ok(destroyed) => {
+            for env in &destroyed {
+                eprintln!(
+                    "  {} Auto-destroyed expired environment: {}",
+                    "⏱".yellow(),
+                    env
+                );
+            }
+        }
+        Err(_) => {}
+    }
+
     eprintln!("  {}", "Environments:".bold());
     eprintln!("  {} local  {}", "●".green(), "(always available)".dimmed());
 
@@ -18,13 +32,20 @@ pub async fn ls() -> Result<()> {
             if let Ok(Some(state)) = cooper_deploy::state::load_state(env_name) {
                 let url = state.url.as_deref().unwrap_or("-");
                 let resource_count = state.resources.len();
+
+                // Check for auto-destroy countdown
+                let ttl_info = cooper_deploy::scheduler::time_remaining(env_name)
+                    .map(|(remaining, _)| format!(" [{}]", remaining))
+                    .unwrap_or_default();
+
                 eprintln!(
-                    "  {} {}  {} ({} resources) {}",
+                    "  {} {}  {} ({} resources) {}{}",
                     "●".cyan(),
                     env_name,
                     state.provider.dimmed(),
                     resource_count,
-                    url.dimmed()
+                    url.dimmed(),
+                    ttl_info.yellow()
                 );
             } else {
                 eprintln!("  {} {}", "●".yellow(), env_name);
