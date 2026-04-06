@@ -20,7 +20,8 @@
     "./ssr": "./dist/ssr.js",
     "./islands": "./dist/islands.js",
     "./ai": "./dist/ai.js",
-    "./rateLimit": "./dist/rateLimit.js"
+    "./rateLimit": "./dist/rateLimit.js",
+    "./test": "./dist/test.js"
   },
   "scripts": {
     "build": "tsc",

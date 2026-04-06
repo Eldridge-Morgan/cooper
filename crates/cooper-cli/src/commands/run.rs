@@ -394,7 +394,7 @@ fn ensure_sdk(project_root: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn find_project_root() -> Result<PathBuf> {
+pub fn find_project_root() -> Result<PathBuf> {
     let cwd = std::env::current_dir()?;
     let mut dir = cwd.as_path();
     loop {
@@ -436,13 +436,13 @@ fn print_analysis_summary(analysis: &ProjectAnalysis) {
     eprintln!("  {} Found {}", "✓".green(), parts.join(", "));
 }
 
-fn print_infra_status(status: &cooper_runtime::infra::embedded::InfraStatus) {
+pub fn print_infra_status(status: &cooper_runtime::infra::embedded::InfraStatus) {
     print_service("Postgres", &status.postgres);
     print_service("NATS", &status.nats);
     print_service("Valkey", &status.valkey);
 }
 
-fn print_service(name: &str, status: &ServiceStatus) {
+pub fn print_service(name: &str, status: &ServiceStatus) {
     match status {
         ServiceStatus::Running(port) => {
             eprintln!("  {} {} on port {}", "✓".green(), name, port);

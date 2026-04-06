@@ -32,6 +32,16 @@ enum Commands {
         port: u16,
     },
 
+    /// Run tests with embedded infrastructure
+    Test {
+        /// Run only tests matching this pattern
+        #[arg(long)]
+        filter: Option<String>,
+        /// Stop on first failure
+        #[arg(long)]
+        fail_fast: bool,
+    },
+
     /// Build for production
     Build {
         /// Output directory
@@ -206,6 +216,10 @@ async fn main() -> Result<()> {
         Commands::Run { all, port } => {
             banner();
             commands::run::run(all, port).await
+        }
+        Commands::Test { filter, fail_fast } => {
+            banner();
+            commands::test::run(filter, fail_fast).await
         }
         Commands::Build { output } => {
             banner();
