@@ -71,9 +71,27 @@ chmod +x "${INSTALL_DIR}/cooper"
 
 ok "Cooper ${TAG} installed"
 
-# ── Step 4: Add to PATH ──────────────────────────────────────────
+# ── Step 4: Make `cooper` available immediately ───────────────────
 
-if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
+# Try to symlink into a directory already on PATH
+LINKED=false
+for BIN_DIR in /usr/local/bin /usr/bin; do
+  if [ -d "$BIN_DIR" ] && [ -w "$BIN_DIR" ]; then
+    ln -sf "${INSTALL_DIR}/cooper" "${BIN_DIR}/cooper"
+    LINKED=true
+    break
+  fi
+done
+
+# If no writable system bin dir, try with sudo
+if [ "$LINKED" = false ]; then
+  if [ -d /usr/local/bin ]; then
+    sudo ln -sf "${INSTALL_DIR}/cooper" /usr/local/bin/cooper 2>/dev/null && LINKED=true
+  fi
+fi
+
+# Fallback: add ~/.cooper/bin to PATH in shell rc
+if [ "$LINKED" = false ]; then
   SHELL_RC=""
   case "${SHELL:-/bin/sh}" in
     */zsh)  SHELL_RC="$HOME/.zshrc" ;;
@@ -89,8 +107,8 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
       info "Added to PATH in ${SHELL_RC}"
     fi
   fi
-  export PATH="${INSTALL_DIR}:$PATH"
 fi
+export PATH="${INSTALL_DIR}:$PATH"
 
 # ── Done ──────────────────────────────────────────────────────────
 
