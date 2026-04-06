@@ -69,16 +69,19 @@ ok "Prerequisites OK"
 
 info "Checking GitHub authentication..."
 
-if ! gh auth status >/dev/null 2>&1; then
+# Skip auth entirely if already logged in with repo access
+if gh auth status >/dev/null 2>&1; then
+  ok "GitHub auth detected"
+
+  # Only add packages scope if missing
+  SCOPES=$(gh auth status 2>&1 | grep "Token scopes" || true)
+  if ! echo "$SCOPES" | grep -q "read:packages"; then
+    info "Adding packages scope..."
+    gh auth refresh --hostname github.com --scopes read:packages,write:packages
+  fi
+else
   info "Logging in to GitHub (a browser window will open)..."
   gh auth login --hostname github.com --web --scopes read:packages,write:packages
-fi
-
-# Check for read:packages scope
-SCOPES=$(gh auth status 2>&1 | grep "Token scopes" || true)
-if ! echo "$SCOPES" | grep -q "read:packages"; then
-  info "Adding packages scope to GitHub CLI..."
-  gh auth refresh --hostname github.com --scopes read:packages,write:packages
 fi
 
 ok "GitHub auth ready"
