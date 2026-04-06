@@ -4,7 +4,7 @@
 
 ```bash
 # macOS / Linux
-curl -L https://getcooper.dev | sh
+curl -fsSL https://getcooper.dev/install.sh | sh
 
 # or Homebrew
 brew install cooperdev/tap/cooper
