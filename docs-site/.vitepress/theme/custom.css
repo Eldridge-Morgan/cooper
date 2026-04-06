@@ -1,0 +1,273 @@
+/* Cooper docs — black, white, monospace, sharp, minimal */
+
+:root {
+  /* Kill all colors */
+  --vp-c-brand-1: #000;
+  --vp-c-brand-2: #333;
+  --vp-c-brand-3: #000;
+  --vp-c-brand-soft: #f0f0f0;
+  --vp-c-tip-1: #000;
+  --vp-c-tip-2: #666;
+  --vp-c-tip-soft: #f5f5f5;
+  --vp-c-warning-1: #000;
+  --vp-c-warning-soft: #f5f5f5;
+  --vp-c-danger-1: #000;
+  --vp-c-danger-soft: #f5f5f5;
+
+  /* Background */
+  --vp-c-bg: #fff;
+  --vp-c-bg-soft: #fafafa;
+  --vp-c-bg-mute: #f5f5f5;
+  --vp-c-bg-alt: #fff;
+
+  /* Text */
+  --vp-c-text-1: #000;
+  --vp-c-text-2: #666;
+  --vp-c-text-3: #999;
+
+  /* Borders */
+  --vp-c-border: #e0e0e0;
+  --vp-c-divider: #e0e0e0;
+  --vp-c-gutter: #e0e0e0;
+
+  /* Font */
+  --vp-font-family-base: "SF Mono", "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  --vp-font-family-mono: "SF Mono", "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+
+  /* Kill all border radius */
+  --vp-border-radius: 0;
+
+  /* Sidebar */
+  --vp-sidebar-bg-color: #fff;
+
+  /* Code */
+  --vp-code-bg: #f5f5f5;
+  --vp-code-color: #000;
+  --vp-code-block-bg: #0a0a0a;
+  --vp-code-block-color: #e0e0e0;
+  --vp-code-line-highlight-color: rgba(0, 0, 0, 0.05);
+  --vp-code-copy-code-hover-bg: #f0f0f0;
+
+  /* Button */
+  --vp-button-brand-bg: #000;
+  --vp-button-brand-hover-bg: #333;
+  --vp-button-brand-active-bg: #111;
+  --vp-button-brand-text: #fff;
+  --vp-button-alt-bg: #f5f5f5;
+  --vp-button-alt-hover-bg: #eee;
+  --vp-button-alt-text: #000;
+  --vp-button-alt-border: #ddd;
+
+  /* Home */
+  --vp-home-hero-name-color: #000;
+
+  /* Badge */
+  --vp-badge-info-bg: #f0f0f0;
+  --vp-badge-info-text: #000;
+  --vp-badge-tip-bg: #f0f0f0;
+  --vp-badge-tip-text: #000;
+}
+
+/* Dark mode — just invert */
+.dark {
+  --vp-c-bg: #0a0a0a;
+  --vp-c-bg-soft: #111;
+  --vp-c-bg-mute: #1a1a1a;
+  --vp-c-bg-alt: #0a0a0a;
+  --vp-c-text-1: #e0e0e0;
+  --vp-c-text-2: #888;
+  --vp-c-text-3: #555;
+  --vp-c-border: #2a2a2a;
+  --vp-c-divider: #2a2a2a;
+  --vp-c-gutter: #2a2a2a;
+  --vp-sidebar-bg-color: #0a0a0a;
+  --vp-c-brand-1: #fff;
+  --vp-c-brand-2: #ccc;
+  --vp-c-brand-3: #fff;
+  --vp-c-brand-soft: #1a1a1a;
+  --vp-code-bg: #1a1a1a;
+  --vp-code-color: #e0e0e0;
+  --vp-button-brand-bg: #fff;
+  --vp-button-brand-hover-bg: #ddd;
+  --vp-button-brand-text: #000;
+  --vp-button-alt-bg: #1a1a1a;
+  --vp-button-alt-hover-bg: #222;
+  --vp-button-alt-text: #e0e0e0;
+  --vp-button-alt-border: #333;
+  --vp-home-hero-name-color: #fff;
+}
+
+/* Kill all border-radius everywhere */
+* {
+  border-radius: 0 !important;
+}
+
+/* Tighter body */
+body {
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+
+/* Sharper headings */
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.vp-doc h1 {
+  font-size: 28px;
+  border-bottom: 2px solid var(--vp-c-border);
+  padding-bottom: 8px;
+}
+
+.vp-doc h2 {
+  font-size: 20px;
+  border-bottom: 1px solid var(--vp-c-border);
+  padding-bottom: 6px;
+}
+
+/* Compact paragraphs */
+.vp-doc p {
+  line-height: 1.6;
+}
+
+/* Sharper code blocks */
+.vp-doc div[class*="language-"] {
+  border: 1px solid var(--vp-c-border);
+}
+
+/* Inline code */
+.vp-doc :not(pre) > code {
+  border: 1px solid var(--vp-c-border);
+  padding: 1px 5px;
+  font-size: 0.9em;
+  background: var(--vp-code-bg);
+}
+
+/* Table */
+.vp-doc table {
+  border: 1px solid var(--vp-c-border);
+}
+
+.vp-doc th {
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  background: var(--vp-c-bg-soft);
+}
+
+.vp-doc td,
+.vp-doc th {
+  border: 1px solid var(--vp-c-border);
+  padding: 6px 10px;
+}
+
+/* Nav — minimal */
+.VPNav {
+  border-bottom: 1px solid var(--vp-c-border) !important;
+}
+
+.VPNavBarTitle .title {
+  font-weight: 700 !important;
+  font-size: 15px !important;
+}
+
+/* Sidebar — tighter */
+.VPSidebar {
+  border-right: 1px solid var(--vp-c-border) !important;
+}
+
+.VPSidebarItem .text {
+  font-size: 13px;
+}
+
+/* Hero — ASCII logo */
+.VPHero .VPImage {
+  max-width: 340px !important;
+  height: auto !important;
+}
+
+.VPHero .name {
+  font-size: 1px !important;
+  color: transparent !important;
+  line-height: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+}
+
+.VPHero .text {
+  font-size: 20px !important;
+  font-weight: 400;
+  color: var(--vp-c-text-2);
+}
+
+.VPHero .tagline {
+  font-size: 15px !important;
+  color: var(--vp-c-text-3);
+}
+
+/* Features — compact cards */
+.VPFeature {
+  border: 1px solid var(--vp-c-border) !important;
+  background: var(--vp-c-bg) !important;
+}
+
+.VPFeature .title {
+  font-size: 14px !important;
+  font-weight: 700;
+}
+
+.VPFeature .details {
+  font-size: 12px !important;
+  color: var(--vp-c-text-2);
+}
+
+/* Footer */
+.VPFooter {
+  border-top: 1px solid var(--vp-c-border) !important;
+}
+
+/* Buttons — sharp */
+.VPButton {
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  padding: 8px 20px !important;
+}
+
+/* Search — fix sizing and style */
+.VPNavBarSearchButton {
+  border: 1px solid var(--vp-c-border) !important;
+  background: var(--vp-c-bg) !important;
+  height: 36px !important;
+  max-width: 200px !important;
+}
+
+.VPNavBarSearchButton .search-icon {
+  color: var(--vp-c-text-3) !important;
+}
+
+/* Search modal */
+.VPLocalSearchBox {
+  --vp-local-search-bg: var(--vp-c-bg) !important;
+}
+
+/* Nav logo — use ASCII art style */
+.VPNavBarTitle .title {
+  font-size: 14px !important;
+  font-weight: 900 !important;
+  letter-spacing: -0.03em !important;
+  text-transform: lowercase !important;
+}
+
+/* Hide the image logo in nav, keep text */
+.VPNavBarTitle img,
+.VPNavBarTitle .logo {
+  display: none !important;
+}
+
+/* Sidebar logo — same */
+.VPSidebarItem img {
+  display: none !important;
+}

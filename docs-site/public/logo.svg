@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 80">
+  <style>text { font-family: "SF Mono", "JetBrains Mono", "Fira Code", monospace; font-size: 11px; fill: currentColor; }</style>
+  <text y="14" xml:space="preserve">   ___</text>
+  <text y="28" xml:space="preserve">  / __\___   ___  _ __   ___ _ __</text>
+  <text y="42" xml:space="preserve"> / /  / _ \ / _ \| '_ \ / _ \ '__|</text>
+  <text y="56" xml:space="preserve">/ /__| (_) | (_) | |_) |  __/ |</text>
+  <text y="70" xml:space="preserve">\____/\___/ \___/| .__/ \___|_|</text>
+  <text y="84" xml:space="preserve">                  |_|</text>
+</svg>
