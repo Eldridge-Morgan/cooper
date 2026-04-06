@@ -37,20 +37,32 @@ jobs:
           echo "Build output:"
           ls -lh dist/
 
-      - name: Set version from latest release
+      - name: Set version from latest tag
+        id: version
         run: |
-          TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "v0.1.0")
+          # Fetch latest tags (auto-release may have pushed one moments ago)
+          git fetch --tags --force
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
           VERSION="${TAG#v}"
-          node -e "
-            const pkg = require('./package.json');
-            pkg.version = '${VERSION}';
-            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-          echo "Publishing cooper-stack@${VERSION}"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Check if this version is already published on npm
+          PUBLISHED=$(npm view cooper-stack@${VERSION} version 2>/dev/null || echo "")
+          if [ "$PUBLISHED" = "$VERSION" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "cooper-stack@${VERSION} already published — skipping"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            node -e "
+              const pkg = require('./package.json');
+              pkg.version = '${VERSION}';
+              require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            "
+            echo "Will publish cooper-stack@${VERSION}"
+          fi
 
       - name: Publish to npm
+        if: steps.version.outputs.skip != 'true'
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
