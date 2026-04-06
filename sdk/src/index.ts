@@ -1,6 +1,6 @@
 export { api } from "./api.js";
 export { CooperError, type ErrorCode } from "./error.js";
-export { database, type DatabaseClient } from "./db.js";
+export { database, type DatabaseClient, type TransactionClient } from "./db.js";
 export { middleware, cooper } from "./middleware.js";
 export { authHandler } from "./auth.js";
 export { topic, type Topic } from "./pubsub.js";
