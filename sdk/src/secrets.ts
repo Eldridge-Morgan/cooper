@@ -17,7 +17,7 @@ export function secret(name: string): () => Promise<string> {
     const envVal = process.env[envKey];
     if (envVal) {
       cached = envVal;
-      return cached;
+      return envVal;
     }
 
     // 2. Check .cooper/secrets/<env>/<name>
@@ -26,8 +26,9 @@ export function secret(name: string): () => Promise<string> {
     const env = process.env.COOPER_ENV ?? "local";
     const secretPath = path.join(".cooper", "secrets", env, name);
     if (fs.existsSync(secretPath)) {
-      cached = fs.readFileSync(secretPath, "utf-8").trim();
-      return cached;
+      const val: string = fs.readFileSync(secretPath, "utf-8").trim();
+      cached = val;
+      return val;
     }
 
     throw new Error(
