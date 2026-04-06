@@ -9,13 +9,14 @@
 export function secret(name: string): () => Promise<string> {
   let cached: string | null = null;
 
-  return async () => {
+  const resolve = async (): Promise<string> => {
     if (cached !== null) return cached;
 
     // 1. Check env var (set by `cooper secrets set`)
     const envKey = `COOPER_SECRET_${name.toUpperCase().replace(/-/g, "_")}`;
-    if (process.env[envKey]) {
-      cached = process.env[envKey]!;
+    const envVal = process.env[envKey];
+    if (envVal) {
+      cached = envVal;
       return cached;
     }
 
@@ -33,4 +34,6 @@ export function secret(name: string): () => Promise<string> {
       `Secret "${name}" not found. Set it with: cooper secrets set ${name} --env ${env}`
     );
   };
+
+  return resolve;
 }
