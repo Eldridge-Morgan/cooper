@@ -44,8 +44,25 @@ impl CronScheduler {
                     tokio::time::sleep(std::time::Duration::from_millis(interval)).await;
                     tracing::info!("Running cron job: {}", name);
 
+                    let t0 = std::time::Instant::now();
                     let rt = state.js_runtime.read().await;
-                    if let Err(e) = rt.call_cron(&source, &export).await {
+                    let result = rt.call_cron(&source, &export).await;
+                    let dur_ms = t0.elapsed().as_millis() as u64;
+
+                    let status = match &result {
+                        Ok(_) => "ok",
+                        Err(_) => "error",
+                    };
+
+                    let _ = state.events_tx.send(
+                        crate::router::DashboardEvent::now("cron", serde_json::json!({
+                            "name": name,
+                            "status": status,
+                            "duration_ms": dur_ms,
+                        }))
+                    );
+
+                    if let Err(e) = result {
                         tracing::error!("Cron job '{}' failed: {}", name, e);
                     }
                 }
