@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Cooper — One-command setup
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/Eldridge-Morgan/cooper/main/setup.sh | sh
+#   curl -fsSL https://getcooper.dev | sh
 
 REPO="Eldridge-Morgan/cooper"
 INSTALL_DIR="${HOME}/.cooper/bin"
