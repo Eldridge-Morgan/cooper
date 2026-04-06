@@ -71,6 +71,27 @@ async fn run_single_app(project_root: PathBuf, port: u16) -> Result<()> {
         }
     }
 
+    // Inject infra connection URLs for JS workers
+    // SAFETY: called before spawning worker threads, single-threaded at this point
+    unsafe {
+        if infra.pg_port > 0 {
+            for db in &analysis.databases {
+                let env_key = format!("COOPER_DB_{}_URL", db.name.to_uppercase());
+                let url = format!(
+                    "postgres://cooper@localhost:{}/cooper_{}",
+                    infra.pg_port, db.name
+                );
+                std::env::set_var(&env_key, &url);
+            }
+        }
+        if infra.valkey_port > 0 {
+            std::env::set_var("COOPER_CACHE_URL", format!("redis://localhost:{}", infra.valkey_port));
+        }
+        if infra.nats_port > 0 {
+            std::env::set_var("COOPER_NATS_URL", format!("nats://localhost:{}", infra.nats_port));
+        }
+    }
+
     // Phase 4: Start the runtime server
     eprintln!("\n  {} Starting server on port {}...\n", "→".cyan(), port);
 

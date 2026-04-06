@@ -101,8 +101,15 @@ impl EmbeddedInfra {
         // Check if pg_ctl is available
         let pg_ctl = find_binary("pg_ctl")?;
 
-        // Initialize if needed
+        // Initialize if needed. We use a marker file to ensure the data dir
+        // was initialized with our "cooper" superuser. If the marker is missing
+        // (stale data dir from an older version), re-initialize.
         let data_path = pg_dir.join("data");
+        let cooper_marker = data_path.join(".cooper_init");
+        if data_path.join("PG_VERSION").exists() && !cooper_marker.exists() {
+            tracing::info!("Reinitializing Postgres data dir (missing cooper role)");
+            let _ = std::fs::remove_dir_all(&data_path);
+        }
         if !data_path.join("PG_VERSION").exists() {
             let initdb = find_binary("initdb")?;
             let status = Command::new(&initdb)
@@ -116,6 +123,8 @@ impl EmbeddedInfra {
             if !status.success() {
                 return Err(anyhow::anyhow!("initdb failed"));
             }
+            // Mark this data dir as initialized with the cooper superuser
+            let _ = std::fs::write(&cooper_marker, "cooper");
         }
 
         // Start Postgres (pg_ctl start -w waits until ready then exits)
@@ -136,9 +145,11 @@ impl EmbeddedInfra {
         for _ in 0..50 {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             if check_port_open(port).await {
-                // Create default database
+                // Create default database (connect via socket dir)
+                let socket_dir = pg_dir.to_str().unwrap();
                 let _ = Command::new(find_binary("createdb").unwrap_or_default())
                     .args(["-p", &port.to_string()])
+                    .args(["-h", socket_dir])
                     .args(["-U", "cooper"])
                     .arg("cooper_main")
                     .stdout(Stdio::null())
@@ -229,8 +240,11 @@ impl EmbeddedInfra {
             let sql = std::fs::read_to_string(entry.path())?;
             let psql = find_binary("psql").unwrap_or_else(|_| "psql".into());
 
+            let pg_dir = self.data_dir.join("postgres");
+            let socket_dir = pg_dir.to_str().unwrap_or("/tmp");
             let status = Command::new(&psql)
                 .args(["-p", &self.pg_port.to_string()])
+                .args(["-h", socket_dir])
                 .args(["-U", "cooper"])
                 .args(["-d", "cooper_main"])
                 .args(["-c", &sql])
