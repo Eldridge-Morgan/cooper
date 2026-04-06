@@ -73,38 +73,22 @@ ok "Cooper ${TAG} installed"
 
 # ── Step 4: Make `cooper` available immediately ───────────────────
 
-# Try to symlink into a directory already on PATH
-LINKED=false
-for BIN_DIR in /usr/local/bin /usr/bin; do
-  if [ -d "$BIN_DIR" ] && [ -w "$BIN_DIR" ]; then
-    ln -sf "${INSTALL_DIR}/cooper" "${BIN_DIR}/cooper"
-    LINKED=true
-    break
-  fi
-done
+# Add to shell profile so it persists across sessions
+SHELL_RC=""
+case "${SHELL:-/bin/sh}" in
+  */zsh)  SHELL_RC="$HOME/.zshrc" ;;
+  */bash) SHELL_RC="$HOME/.bashrc" ;;
+  */fish) SHELL_RC="$HOME/.config/fish/config.fish" ;;
+esac
 
-# If no writable system bin dir, try with sudo
-if [ "$LINKED" = false ]; then
-  if [ -d /usr/local/bin ]; then
-    sudo ln -sf "${INSTALL_DIR}/cooper" /usr/local/bin/cooper 2>/dev/null && LINKED=true
-  fi
-fi
-
-# Fallback: add ~/.cooper/bin to PATH in shell rc
-if [ "$LINKED" = false ]; then
-  SHELL_RC=""
-  case "${SHELL:-/bin/sh}" in
-    */zsh)  SHELL_RC="$HOME/.zshrc" ;;
-    */bash) SHELL_RC="$HOME/.bashrc" ;;
-    */fish) SHELL_RC="$HOME/.config/fish/config.fish" ;;
-  esac
-
-  if [ -n "$SHELL_RC" ]; then
-    if ! grep -qF "$INSTALL_DIR" "$SHELL_RC" 2>/dev/null; then
-      echo "" >> "$SHELL_RC"
-      echo "# Cooper CLI" >> "$SHELL_RC"
+if [ -n "$SHELL_RC" ]; then
+  if ! grep -qF "$INSTALL_DIR" "$SHELL_RC" 2>/dev/null; then
+    echo "" >> "$SHELL_RC"
+    echo "# Cooper CLI" >> "$SHELL_RC"
+    if [ "${SHELL:-}" = "*/fish" ]; then
+      echo "set -gx PATH ${INSTALL_DIR} \$PATH" >> "$SHELL_RC"
+    else
       echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$SHELL_RC"
-      info "Added to PATH in ${SHELL_RC}"
     fi
   fi
 fi
@@ -115,9 +99,11 @@ export PATH="${INSTALL_DIR}:$PATH"
 echo ""
 ok "Setup complete!"
 echo ""
-echo "  Cooper ${TAG} is ready to use."
+echo "  Cooper ${TAG} is ready. Run this to get started:"
 echo ""
-echo "  Get started:"
+if [ -n "$SHELL_RC" ]; then
+  echo "    source ${SHELL_RC}"
+fi
 echo "    cooper new my-app"
 echo "    cd my-app"
 echo "    npm install"
@@ -126,7 +112,3 @@ echo ""
 echo "  Dev server: http://localhost:4000"
 echo "  Dashboard:  http://localhost:9500"
 echo ""
-
-if ! command -v cooper >/dev/null 2>&1; then
-  warn "Open a new terminal for PATH changes to take effect"
-fi
