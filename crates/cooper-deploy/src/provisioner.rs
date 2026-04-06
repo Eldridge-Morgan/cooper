@@ -1,4 +1,7 @@
-use crate::providers::{aws::AwsProvisioner, azure::AzureProvisioner, fly::FlyProvisioner, gcp::GcpProvisioner};
+use crate::providers::{
+    aws::AwsProvisioner, azure::AzureProvisioner, cooper_cloud::CooperCloudProvisioner,
+    fly::FlyProvisioner, gcp::GcpProvisioner,
+};
 use crate::{CloudProvider, DeployPlan, DeployResult};
 use anyhow::Result;
 use cooper_codegen::analyzer::ProjectAnalysis;
@@ -12,22 +15,11 @@ pub async fn provision(
     project_name: &str,
 ) -> Result<DeployResult> {
     match provider {
-        CloudProvider::Aws => {
-            let p = AwsProvisioner::new();
-            p.provision(plan, analysis, env, project_name).await
-        }
-        CloudProvider::Gcp => {
-            let p = GcpProvisioner::new()?;
-            p.provision(plan, analysis, env, project_name).await
-        }
-        CloudProvider::Azure => {
-            let p = AzureProvisioner::new();
-            p.provision(plan, analysis, env, project_name).await
-        }
-        CloudProvider::Fly => {
-            let p = FlyProvisioner::new();
-            p.provision(plan, analysis, env, project_name).await
-        }
+        CloudProvider::Aws => AwsProvisioner::new().provision(plan, analysis, env, project_name).await,
+        CloudProvider::Gcp => GcpProvisioner::new()?.provision(plan, analysis, env, project_name).await,
+        CloudProvider::Azure => AzureProvisioner::new().provision(plan, analysis, env, project_name).await,
+        CloudProvider::Fly => FlyProvisioner::new().provision(plan, analysis, env, project_name).await,
+        CloudProvider::Cooper => CooperCloudProvisioner::new().provision(plan, analysis, env, project_name).await,
     }
 }
 
@@ -38,5 +30,6 @@ pub async fn destroy(provider: &CloudProvider, env: &str, project_name: &str) ->
         CloudProvider::Gcp => GcpProvisioner::new()?.destroy(env, project_name).await,
         CloudProvider::Azure => AzureProvisioner::new().destroy(env, project_name).await,
         CloudProvider::Fly => FlyProvisioner::new().destroy(env, project_name).await,
+        CloudProvider::Cooper => CooperCloudProvisioner::new().destroy(env, project_name).await,
     }
 }

@@ -13,6 +13,7 @@ pub enum CloudProvider {
     Gcp,
     Azure,
     Fly,
+    Cooper,
 }
 
 impl CloudProvider {
@@ -22,8 +23,9 @@ impl CloudProvider {
             "gcp" => Ok(Self::Gcp),
             "azure" => Ok(Self::Azure),
             "fly" => Ok(Self::Fly),
+            "cooper" => Ok(Self::Cooper),
             _ => Err(anyhow::anyhow!(
-                "Unknown cloud provider: {}. Use aws, gcp, azure, or fly.",
+                "Unknown cloud provider: {}. Use aws, gcp, azure, fly, or cooper.",
                 s
             )),
         }

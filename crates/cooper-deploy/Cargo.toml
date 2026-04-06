@@ -20,3 +20,4 @@ dialoguer.workspace = true
 base64 = "0.22"
 sha2 = "0.10"
 hmac = "0.12"
+dirs-next.workspace = true
