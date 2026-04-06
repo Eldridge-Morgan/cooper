@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build-and-publish:
@@ -24,8 +23,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@eldridge-morgan"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
         run: npm install
@@ -39,21 +37,20 @@ jobs:
           echo "Build output:"
           ls -lh dist/
 
-      - name: Set scoped name and version from latest release
+      - name: Set version from latest release
         run: |
           TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "v0.1.0")
           VERSION="${TAG#v}"
           node -e "
             const pkg = require('./package.json');
-            pkg.name = '@eldridge-morgan/cooper';
             pkg.version = '${VERSION}';
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
-          echo "Publishing @eldridge-morgan/cooper@${VERSION}"
+          echo "Publishing cooper@${VERSION}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish to GitHub Packages
-        run: npm publish
+      - name: Publish to npm
+        run: npm publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
