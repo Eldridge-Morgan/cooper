@@ -34,9 +34,6 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-15
             name: cooper-darwin-arm64
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            name: cooper-windows-x86_64
 
     runs-on: ${{ matrix.os }}
 
@@ -62,20 +59,12 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} --bin cooper
 
-      - name: Package binary (Unix)
-        if: runner.os != 'Windows'
+      - name: Package binary
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ../../../${{ matrix.name }}.tar.gz cooper
           cd ../../..
           shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
-
-      - name: Package binary (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Compress-Archive -Path "target/${{ matrix.target }}/release/cooper.exe" -DestinationPath "${{ matrix.name }}.zip"
-          (Get-FileHash "${{ matrix.name }}.zip" -Algorithm SHA256).Hash.ToLower() + "  ${{ matrix.name }}.zip" | Out-File -Encoding ascii "${{ matrix.name }}.zip.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -84,8 +73,6 @@ jobs:
           path: |
             ${{ matrix.name }}.tar.gz
             ${{ matrix.name }}.tar.gz.sha256
-            ${{ matrix.name }}.zip
-            ${{ matrix.name }}.zip.sha256
 
   release:
     needs: build
@@ -142,10 +129,6 @@ jobs:
             pkg: "@eldridge-morgan/cooper-linux-arm64"
             os: linux
             cpu: arm64
-          - target: cooper-windows-x86_64
-            pkg: "@eldridge-morgan/cooper-win32-x64"
-            os: win32
-            cpu: x64
 
     steps:
       - uses: actions/checkout@v4
@@ -174,14 +157,8 @@ jobs:
       - name: Build platform npm package
         run: |
           mkdir -p pkg/bin
-          if [[ "${{ matrix.os }}" == "win32" ]]; then
-            unzip ${{ matrix.target }}.zip -d pkg/bin/
-            BIN=cooper.exe
-          else
-            tar xzf ${{ matrix.target }}.tar.gz -C pkg/bin/
-            chmod +x pkg/bin/cooper
-            BIN=cooper
-          fi
+          tar xzf ${{ matrix.target }}.tar.gz -C pkg/bin/
+          chmod +x pkg/bin/cooper
 
           cat > pkg/package.json << EOF
           {
@@ -190,7 +167,7 @@ jobs:
             "description": "Cooper CLI binary for ${{ matrix.os }}-${{ matrix.cpu }}",
             "os": ["${{ matrix.os }}"],
             "cpu": ["${{ matrix.cpu }}"],
-            "main": "bin/${BIN}",
+            "main": "bin/cooper",
             "files": ["bin/"],
             "repository": {
               "type": "git",

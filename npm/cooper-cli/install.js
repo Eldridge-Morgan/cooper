@@ -11,7 +11,6 @@ const PLATFORMS = {
   "darwin-x64": "@eldridge-morgan/cooper-darwin-x64",
   "linux-x64": "@eldridge-morgan/cooper-linux-x64",
   "linux-arm64": "@eldridge-morgan/cooper-linux-arm64",
-  "win32-x64": "@eldridge-morgan/cooper-win32-x64",
 };
 
 function main() {
@@ -32,8 +31,7 @@ function main() {
   try {
     const pkgDir = require.resolve(`${pkg}/package.json`);
     const dir = join(pkgDir, "..");
-    const isWin = platform === "win32";
-    binaryPath = join(dir, "bin", isWin ? "cooper.exe" : "cooper");
+    binaryPath = join(dir, "bin", "cooper");
   } catch {
     console.error(
       `Failed to find package ${pkg}.\n` +
@@ -51,13 +49,9 @@ function main() {
   const binDir = join(__dirname, "bin");
   mkdirSync(binDir, { recursive: true });
 
-  const isWin = platform === "win32";
-  const dest = join(binDir, isWin ? "cooper.exe" : "cooper");
-
+  const dest = join(binDir, "cooper");
   copyFileSync(binaryPath, dest);
-  if (!isWin) {
-    chmodSync(dest, 0o755);
-  }
+  chmodSync(dest, 0o755);
 
   console.log(`✓ Cooper CLI installed (${key})`);
 }
