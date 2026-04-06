@@ -37,11 +37,27 @@ fi
 if ! command -v gh >/dev/null 2>&1; then
   info "Installing GitHub CLI..."
   case "$(uname -s)" in
-    Darwin*) brew install gh ;;
+    Darwin*)
+      if command -v brew >/dev/null 2>&1; then
+        brew install gh
+      else
+        err "Install Homebrew first: https://brew.sh — then re-run this script"
+      fi
+      ;;
     Linux*)
-      curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-      echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-      sudo apt update && sudo apt install gh -y
+      if command -v apt-get >/dev/null 2>&1; then
+        # Debian/Ubuntu/Mint
+        sudo mkdir -p -m 755 /etc/apt/keyrings
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+        sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        sudo apt-get update && sudo apt-get install gh -y
+      elif command -v dnf >/dev/null 2>&1; then
+        # Fedora/RHEL
+        sudo dnf install gh -y
+      else
+        err "Install GitHub CLI manually: https://cli.github.com"
+      fi
       ;;
     *) err "Install GitHub CLI manually: https://cli.github.com" ;;
   esac
@@ -54,8 +70,8 @@ ok "Prerequisites OK"
 info "Checking GitHub authentication..."
 
 if ! gh auth status >/dev/null 2>&1; then
-  info "Logging in to GitHub..."
-  gh auth login --hostname github.com --git-protocol https
+  info "Logging in to GitHub (a browser window will open)..."
+  gh auth login --hostname github.com --web --scopes read:packages,write:packages
 fi
 
 # Check for read:packages scope
@@ -158,8 +174,8 @@ fi
 # Add auth token (using gh token dynamically)
 # Remove old token line if present, then add fresh one
 if [ -f "$GLOBAL_NPMRC" ]; then
-  sed -i.bak '/npm\.pkg\.github\.com\/:_authToken/d' "$GLOBAL_NPMRC" 2>/dev/null || true
-  rm -f "${GLOBAL_NPMRC}.bak"
+  grep -v 'npm\.pkg\.github\.com/:_authToken' "$GLOBAL_NPMRC" > "${GLOBAL_NPMRC}.tmp" 2>/dev/null || true
+  mv "${GLOBAL_NPMRC}.tmp" "$GLOBAL_NPMRC"
 fi
 echo "//npm.pkg.github.com/:_authToken=$(gh auth token)" >> "$GLOBAL_NPMRC"
 
