@@ -4,6 +4,7 @@ export { database, type DatabaseClient } from "./db.js";
 export { middleware, cooper } from "./middleware.js";
 export { authHandler } from "./auth.js";
 export { topic, type Topic } from "./pubsub.js";
+export { closeNats } from "./nats.js";
 export { cron } from "./cron.js";
 export { cache, type CacheClient } from "./cache.js";
 export { bucket, type BucketClient } from "./storage.js";
