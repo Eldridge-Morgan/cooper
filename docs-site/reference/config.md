@@ -1,7 +1,7 @@
 # cooper.config.ts
 
 ```ts
-import { secret } from "cooper/secrets";
+import { secret } from "cooper-stack/secrets";
 
 export default {
   name: "my-app",

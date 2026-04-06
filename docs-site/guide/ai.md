@@ -5,7 +5,7 @@ Vector store and LLM gateway built in.
 ## Vector store
 
 ```ts
-import { vectorStore } from "cooper/ai";
+import { vectorStore } from "cooper-stack/ai";
 
 export const embeddings = vectorStore("product-embeddings", {
   dimensions: 1536,
@@ -21,7 +21,7 @@ Uses pgvector locally, Pinecone/Weaviate in production.
 ## LLM gateway
 
 ```ts
-import { llmGateway } from "cooper/ai";
+import { llmGateway } from "cooper-stack/ai";
 
 export const llm = llmGateway({
   primary: { provider: "openai", model: "gpt-4o" },

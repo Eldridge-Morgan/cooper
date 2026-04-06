@@ -5,7 +5,7 @@ Define endpoints with the `api()` function. Cooper's Rust runtime handles HTTP s
 ## Basic route
 
 ```ts
-import { api } from "cooper/api";
+import { api } from "cooper-stack/api";
 
 export const getUser = api(
   { method: "GET", path: "/users/:id" },
@@ -71,7 +71,7 @@ See [Auth](/guide/auth) for setting up the auth handler.
 ## Per-route middleware
 
 ```ts
-import { middleware } from "cooper/middleware";
+import { middleware } from "cooper-stack/middleware";
 
 const rateLimiter = middleware(async (req, next) => {
   // ...

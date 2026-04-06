@@ -6,7 +6,7 @@ Zero JS ships to the browser unless you declare an island. Islands are component
 
 ```tsx
 // islands/LikeButton.island.tsx
-import { island } from "cooper/islands";
+import { island } from "cooper-stack/islands";
 import { useState } from "react";
 
 export default island(function LikeButton({ userId, initialCount }) {

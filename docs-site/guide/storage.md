@@ -3,7 +3,7 @@
 File storage backed by the local filesystem in dev and S3/GCS/Azure Blob in production.
 
 ```ts
-import { bucket } from "cooper/storage";
+import { bucket } from "cooper-stack/storage";
 
 export const avatars = bucket("avatars", { public: true });
 

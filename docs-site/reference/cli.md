@@ -5,6 +5,10 @@ cooper new <name>                      # scaffold a new project
 cooper run                             # local dev server + infra + hot reload
 cooper run --all                       # monorepo: run all apps
 
+cooper test                            # run tests with embedded infra
+cooper test --filter <pattern>         # run matching tests only
+cooper test --fail-fast                # stop on first failure
+
 cooper build                           # production build
 cooper deploy --env <env> --cloud <c>  # provision + deploy
 cooper deploy --dry-run                # diff + cost estimate

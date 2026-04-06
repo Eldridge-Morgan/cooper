@@ -5,7 +5,7 @@ In-memory cache backed by Valkey/Redis. Embedded locally, managed in production.
 ## Declare
 
 ```ts
-import { cache } from "cooper/cache";
+import { cache } from "cooper-stack/cache";
 
 export const userCache = cache<User>("users", { ttl: "10m" });
 ```

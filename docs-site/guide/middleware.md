@@ -5,7 +5,7 @@ Composable middleware — no restrictions. Use per-route or globally.
 ## Define middleware
 
 ```ts
-import { middleware } from "cooper/middleware";
+import { middleware } from "cooper-stack/middleware";
 import { CooperError } from "cooper";
 
 const rateLimiter = middleware(async (req, next) => {
@@ -34,7 +34,7 @@ export const deleteUser = api(
 ## Global
 
 ```ts
-import { cooper } from "cooper/middleware";
+import { cooper } from "cooper-stack/middleware";
 
 cooper.use(rateLimiter, logger);
 ```

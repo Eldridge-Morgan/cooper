@@ -4,7 +4,7 @@
 
 ```bash
 # macOS / Linux
-curl -L https://install.cooperdev.io | sh
+curl -L https://getcooper.dev | sh
 
 # or Homebrew
 brew install cooperdev/tap/cooper
@@ -62,7 +62,7 @@ No Docker. No config files. No setup scripts.
 
 ```ts
 // services/hello/api.ts
-import { api } from "cooper/api";
+import { api } from "cooper-stack/api";
 
 export const hello = api(
   { method: "GET", path: "/hello/:name" },
@@ -81,8 +81,8 @@ Save the file. Cooper hot-reloads. Hit `http://localhost:4000/hello/world`:
 ## Add a database
 
 ```ts
-import { api } from "cooper/api";
-import { database } from "cooper/db";
+import { api } from "cooper-stack/api";
+import { database } from "cooper-stack/db";
 
 export const db = database("main", {
   migrations: "./migrations",
