@@ -78,11 +78,13 @@ async function handleCall(params: {
     throw new CooperError("INTERNAL", `Export "${params.export}" is not callable`);
   }
 
-  // Validation — run Zod schema if present
+  // Validation — run Zod schema if present.
+  // Use passthrough() to preserve path params that aren't in the schema.
   let validatedInput = params.input;
   if (routeConfig?.validate) {
     const schema = routeConfig.validate;
-    const result = schema.safeParse(params.input);
+    const lenient = typeof schema.passthrough === "function" ? schema.passthrough() : schema;
+    const result = lenient.safeParse(params.input);
     if (!result.success) {
       throw new CooperError(
         "VALIDATION_FAILED",
@@ -232,6 +234,34 @@ rl.on("line", async (line) => {
     );
   }
 });
+
+// Preload auth handlers and middleware — these register via side effects
+async function preloadSideEffects() {
+  const fs = await import("node:fs");
+  const servicesDir = path.join(projectRoot, "services");
+  if (!fs.existsSync(servicesDir)) return;
+
+  const scanDir = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        scanDir(fullPath);
+      } else if (entry.name.endsWith(".ts") || entry.name.endsWith(".js")) {
+        try {
+          const content = fs.readFileSync(fullPath, "utf-8");
+          if (content.includes("authHandler") || content.includes("middleware(")) {
+            const relative = path.relative(projectRoot, fullPath);
+            loadModule(relative).catch(() => {});
+          }
+        } catch {}
+      }
+    }
+  };
+
+  scanDir(servicesDir);
+}
+
+await preloadSideEffects();
 
 // Signal ready
 process.stdout.write(JSON.stringify({ id: 0, result: { ready: true, pid: process.pid } }) + "\n");
