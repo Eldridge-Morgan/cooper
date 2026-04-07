@@ -46,7 +46,10 @@ impl EmbeddedInfra {
                 status.postgres = ServiceStatus::Running(port);
             }
             Ok(Err(e)) => {
-                if check_port_open(5432).await {
+                // Only use external Postgres if we can actually connect to it
+                // with the cooper role. A random system Postgres on 5432 with
+                // SCRAM auth and no cooper role will fail at query time.
+                if check_port_open(5432).await && verify_postgres(5432).await {
                     self.pg_port = 5432;
                     status.postgres = ServiceStatus::External(5432);
                 } else {
@@ -361,4 +364,30 @@ async fn check_port_open(port: u16) -> bool {
     tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
         .await
         .is_ok()
+}
+
+/// Verify that an external Postgres on the given port is usable by Cooper.
+/// Tries to connect as the "cooper" user with no password and run a simple query.
+/// Returns false if auth fails, role doesn't exist, or connection is refused.
+async fn verify_postgres(port: u16) -> bool {
+    let psql = match find_binary("psql") {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let result = Command::new(&psql)
+        .args(["-p", &port.to_string()])
+        .args(["-h", "localhost"])
+        .args(["-U", "cooper"])
+        .args(["-d", "postgres"])
+        .args(["-c", "SELECT 1"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await;
+
+    match result {
+        Ok(status) => status.success(),
+        Err(_) => false,
+    }
 }
