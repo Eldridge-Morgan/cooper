@@ -94,6 +94,18 @@ export function queue<T = any>(
     memProcessing = true;
 
     while (memJobs.length > 0) {
+      // Check if all remaining jobs are scheduled in the future
+      const now = Date.now();
+      const nextReady = memJobs.find((j) => j.scheduledAt <= now);
+      if (!nextReady) {
+        // All jobs are delayed — sleep until the earliest one, then retry
+        const earliest = Math.min(...memJobs.map((j) => j.scheduledAt));
+        const sleepMs = Math.max(earliest - now, 100);
+        setTimeout(() => processMemQueue(), sleepMs);
+        memProcessing = false;
+        return;
+      }
+
       const batch = memJobs.splice(0, concurrency);
       await Promise.allSettled(
         batch.map(async (job) => {

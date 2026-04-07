@@ -51,23 +51,30 @@ export function database(name: string, config?: DatabaseConfig): DatabaseClient 
     ?? `postgres://cooper@localhost:5432/cooper_${name}`;
 
   let pool: any = null;
+  let poolPromise: Promise<any> | null = null;
 
   const ensurePool = async () => {
     if (pool) return pool;
+    if (poolPromise) return poolPromise;
 
-    if (engine === "postgres") {
-      const pg = await import("pg");
-      pool = new pg.default.Pool({ connectionString: connStr });
-      return pool;
+    poolPromise = (async () => {
+      if (engine === "postgres") {
+        const pg = await import("pg");
+        pool = new pg.default.Pool({ connectionString: connStr });
+        return pool;
+      }
+
+      if (engine === "mysql") {
+        const mysql = await import("mysql2/promise");
+        pool = await mysql.createPool(connStr);
+        return pool;
     }
 
-    if (engine === "mysql") {
-      const mysql = await import("mysql2/promise");
-      pool = await mysql.createPool(connStr);
-      return pool;
-    }
+      throw new Error(`Database engine "${engine}" not yet supported in JS runtime`);
+    })();
 
-    throw new Error(`Database engine "${engine}" not yet supported in JS runtime`);
+    poolPromise.catch(() => { poolPromise = null; }); // Allow retry on failure
+    return poolPromise;
   };
 
   const client: DatabaseClient = {
@@ -105,10 +112,14 @@ export function database(name: string, config?: DatabaseConfig): DatabaseClient 
     async insert<T = any>(table: string, data: Record<string, any>): Promise<T> {
       const keys = Object.keys(data);
       const values = Object.values(data);
+      // Quote identifiers to prevent SQL injection
+      const quoteId = (id: string) => `"${id.replace(/"/g, '""')}"`;
+      const quotedTable = quoteId(table);
+      const quotedKeys = keys.map(quoteId).join(", ");
       const placeholders = keys.map((_, i) =>
         engine === "postgres" ? `$${i + 1}` : "?"
-      );
-      const sql = `INSERT INTO ${table} (${keys.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING *`;
+      ).join(", ");
+      const sql = `INSERT INTO ${quotedTable} (${quotedKeys}) VALUES (${placeholders}) RETURNING *`;
       const row = await client.queryRow<T>(sql, values);
       return row!;
     },
@@ -137,8 +148,9 @@ export function database(name: string, config?: DatabaseConfig): DatabaseClient 
             async insert<T = any>(table: string, data: Record<string, any>): Promise<T> {
               const keys = Object.keys(data);
               const values = Object.values(data);
-              const placeholders = keys.map((_, i) => `$${i + 1}`);
-              const sql = `INSERT INTO ${table} (${keys.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING *`;
+              const quoteId = (id: string) => `"${id.replace(/"/g, '""')}"`;
+              const placeholders = keys.map((_, i) => `$${i + 1}`).join(", ");
+              const sql = `INSERT INTO ${quoteId(table)} (${keys.map(quoteId).join(", ")}) VALUES (${placeholders}) RETURNING *`;
               const res = await pgClient.query(sql, values);
               return res.rows[0] as T;
             },
@@ -177,10 +189,11 @@ export function database(name: string, config?: DatabaseConfig): DatabaseClient 
             async insert<T = any>(table: string, data: Record<string, any>): Promise<T> {
               const keys = Object.keys(data);
               const values = Object.values(data);
-              const placeholders = keys.map(() => "?");
-              const sql = `INSERT INTO ${table} (${keys.join(", ")}) VALUES (${placeholders.join(", ")})`;
+              const quoteId = (id: string) => `\`${id.replace(/`/g, '``')}\``;
+              const placeholders = keys.map(() => "?").join(", ");
+              const sql = `INSERT INTO ${quoteId(table)} (${keys.map(quoteId).join(", ")}) VALUES (${placeholders})`;
               await conn.execute(sql, values);
-              const [rows] = await conn.execute(`SELECT * FROM ${table} WHERE id = LAST_INSERT_ID()`);
+              const [rows] = await conn.execute(`SELECT * FROM ${quoteId(table)} WHERE id = LAST_INSERT_ID()`);
               return (rows as any[])[0] as T;
             },
             get conn() { return conn; },
