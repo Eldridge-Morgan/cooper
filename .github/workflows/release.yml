@@ -178,6 +178,15 @@ jobs:
           EOF
 
       - name: Publish platform package
-        run: cd pkg && npm publish
+        run: |
+          cd pkg
+          PKG_NAME=$(node -e "console.log(require('./package.json').name)")
+          PKG_VER=$(node -e "console.log(require('./package.json').version)")
+          # Skip if version already published
+          if npm view "${PKG_NAME}@${PKG_VER}" version 2>/dev/null; then
+            echo "${PKG_NAME}@${PKG_VER} already published — skipping"
+          else
+            npm publish
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
