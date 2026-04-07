@@ -48,7 +48,7 @@ export function database(name: string, config?: DatabaseConfig): DatabaseClient 
 
   // Connection details injected by the Rust runtime via env vars
   const connStr = process.env[`COOPER_DB_${name.toUpperCase()}_URL`]
-    ?? `postgres://cooper:cooper@localhost:5432/cooper_${name}`;
+    ?? `postgres://cooper@localhost:5432/cooper_${name}`;
 
   let pool: any = null;
 
