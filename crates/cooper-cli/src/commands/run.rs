@@ -134,7 +134,7 @@ async fn run_single_app(project_root: PathBuf, port: u16) -> Result<()> {
     watcher.watch(&project_root, RecursiveMode::Recursive)?;
 
     // Start server in background
-    let server_handle = {
+    let mut server_handle = {
         let server = Arc::clone(&server);
         tokio::spawn(async move { server.start().await })
     };
@@ -176,15 +176,19 @@ async fn run_single_app(project_root: PathBuf, port: u16) -> Result<()> {
     });
 
     // Graceful shutdown on Ctrl+C
-    let shutdown_infra = infra.pg_port; // just to check infra is alive
-    let _ = shutdown_infra; // suppress unused warning
+    // Wait for either the server to exit or Ctrl+C
     tokio::select! {
-        result = server_handle => {
+        result = &mut server_handle => {
             infra.stop().await;
             result?
         }
         _ = tokio::signal::ctrl_c() => {
             eprintln!("\n  {} Shutting down...", "→".cyan());
+            // Abort the server first (kills JS workers), THEN stop Docker containers.
+            // This prevents the pg pool crash from Docker stopping Postgres
+            // while the JS worker still has idle connections.
+            server_handle.abort();
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             infra.stop().await;
             eprintln!("  {} Stopped", "✓".green());
             Ok(())
