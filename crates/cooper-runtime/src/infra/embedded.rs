@@ -71,7 +71,9 @@ impl EmbeddedInfra {
                 self.pg_port = port;
                 // Wait for Postgres inside the container to accept connections
                 if wait_for_postgres(&pg_container).await {
-                    // Create cooper_main database if it doesn't exist
+                    // Small delay after pg_isready — Postgres may still be finalizing init
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    // Create cooper_main database if it doesn't exist (retries internally)
                     if let Err(e) = create_database(&pg_container, "cooper_main").await {
                         tracing::warn!("Failed to create database: {e}");
                     }
@@ -392,34 +394,53 @@ async fn wait_for_postgres(container_name: &str) -> bool {
 }
 
 /// Create a database if it doesn't exist, using docker exec.
+/// Retries up to 10 times (Postgres may still be initializing after pg_isready passes).
 async fn create_database(container_name: &str, db_name: &str) -> Result<()> {
-    let check = Command::new("docker")
-        .args(["exec", container_name,
-               "psql", "-U", "cooper", "-d", "postgres",
-               "-tAc", &format!("SELECT 1 FROM pg_database WHERE datname='{db_name}'")])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .await?;
-
-    let exists = String::from_utf8_lossy(&check.stdout).trim().contains('1');
-
-    if !exists {
-        let output = Command::new("docker")
+    for attempt in 0..10 {
+        let check = Command::new("docker")
             .args(["exec", container_name,
-                   "createdb", "-U", "cooper", db_name])
+                   "psql", "-U", "cooper", "-d", "postgres",
+                   "-tAc", &format!("SELECT 1 FROM pg_database WHERE datname='{db_name}'")])
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::null())
             .output()
-            .await?;
+            .await;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("createdb failed: {}", stderr.trim()));
+        match check {
+            Ok(output) if String::from_utf8_lossy(&output.stdout).trim().contains('1') => {
+                return Ok(()); // Database already exists
+            }
+            Ok(_) => {
+                // Database doesn't exist — try to create it
+                let output = Command::new("docker")
+                    .args(["exec", container_name,
+                           "createdb", "-U", "cooper", db_name])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped())
+                    .output()
+                    .await?;
+
+                if output.status.success() {
+                    return Ok(());
+                }
+
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if attempt < 9 {
+                    tracing::debug!("createdb attempt {} failed: {}, retrying...", attempt + 1, stderr.trim());
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                } else {
+                    return Err(anyhow::anyhow!("createdb failed after 10 attempts: {}", stderr.trim()));
+                }
+            }
+            Err(_) => {
+                if attempt < 9 {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            }
         }
     }
 
-    Ok(())
+    Err(anyhow::anyhow!("createdb failed: exhausted retries"))
 }
 
 async fn wait_for_port(port: u16, timeout_secs: u64) -> bool {
