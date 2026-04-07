@@ -61,6 +61,10 @@ export function database(name: string, config?: DatabaseConfig): DatabaseClient 
       if (engine === "postgres") {
         const pg = await import("pg");
         pool = new pg.default.Pool({ connectionString: connStr });
+        // Prevent unhandled error crash on connection termination (e.g., Docker stop)
+        pool.on("error", (err: Error) => {
+          console.error(`[cooper] Database pool error: ${err.message}`);
+        });
         return pool;
       }
 
