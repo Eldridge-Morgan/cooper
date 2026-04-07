@@ -131,14 +131,21 @@ impl EmbeddedInfra {
         }
         if !data_path.join("PG_VERSION").exists() {
             let initdb = resolve_postgres("initdb").await?;
-            let status = Command::new(&initdb)
-                .args(["--pgdata", data_path.to_str().unwrap()])
+            let cooper_pg_lib = dirs_home().join(".cooper").join("pg").join("lib");
+            let mut cmd = Command::new(&initdb);
+            cmd.args(["--pgdata", data_path.to_str().unwrap()])
                 .args(["--auth", "trust"])
                 .args(["--username", "cooper"])
+                .args(["--no-locale"])
+                .args(["--encoding", "UTF8"])
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .await?;
+                .stderr(Stdio::null());
+            // Set library path for downloaded Postgres
+            if cooper_pg_lib.exists() {
+                let lib_key = if cfg!(target_os = "macos") { "DYLD_LIBRARY_PATH" } else { "LD_LIBRARY_PATH" };
+                cmd.env(lib_key, &cooper_pg_lib);
+            }
+            let status = cmd.status().await?;
             if !status.success() {
                 return Err(anyhow::anyhow!("initdb failed"));
             }
@@ -147,14 +154,18 @@ impl EmbeddedInfra {
         }
 
         // Start Postgres (pg_ctl start -w waits until ready then exits)
-        let status = Command::new(&pg_ctl)
+        let mut pg_start = Command::new(&pg_ctl);
+        pg_start
             .args(["start", "-w", "-D", data_path.to_str().unwrap()])
             .args(["-o", &format!("-p {port} -k {}", pg_dir.to_str().unwrap())])
             .args(["-l", pg_dir.join("postgres.log").to_str().unwrap()])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await?;
+            .stderr(Stdio::null());
+        if cooper_pg_lib.exists() {
+            let lib_key = if cfg!(target_os = "macos") { "DYLD_LIBRARY_PATH" } else { "LD_LIBRARY_PATH" };
+            pg_start.env(lib_key, &cooper_pg_lib);
+        }
+        let status = pg_start.status().await?;
 
         if !status.success() {
             return Err(anyhow::anyhow!("pg_ctl start failed"));
@@ -390,19 +401,24 @@ async fn verify_postgres(port: u16) -> bool {
         Err(_) => return false,
     };
 
-    let result = Command::new(&psql)
-        .args(["-p", &port.to_string()])
-        .args(["-h", "localhost"])
-        .args(["-U", "cooper"])
-        .args(["-d", "postgres"])
-        .args(["-c", "SELECT 1"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await;
+    // Use --no-password to prevent interactive prompt and timeout after 3s
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        Command::new(&psql)
+            .args(["-p", &port.to_string()])
+            .args(["-h", "localhost"])
+            .args(["-U", "cooper"])
+            .args(["-d", "postgres"])
+            .args(["-w"])  // --no-password: never prompt
+            .args(["-c", "SELECT 1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+    ).await;
 
     match result {
-        Ok(status) => status.success(),
-        Err(_) => false,
+        Ok(Ok(status)) => status.success(),
+        _ => false,
     }
 }
