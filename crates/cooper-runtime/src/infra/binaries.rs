@@ -11,7 +11,7 @@ fn bin_dir() -> PathBuf {
     dirs_home().join(".cooper").join("bin")
 }
 
-fn dirs_home() -> PathBuf {
+pub fn dirs_home() -> PathBuf {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map(PathBuf::from)
@@ -126,25 +126,157 @@ pub async fn resolve_binary(name: &str) -> Result<String> {
     }
 }
 
-/// Also resolve Postgres binaries (pg_ctl, initdb, psql, createdb).
-/// Postgres is more complex — we look for the whole suite.
-pub async fn resolve_postgres() -> Result<String> {
-    // Check if pg_ctl is on PATH
-    if let Ok(path) = which::which("pg_ctl") {
+/// Resolve a Postgres binary (pg_ctl, initdb, psql, createdb).
+/// Downloads the full Postgres distribution on first use from theseus-rs/postgresql-binaries.
+pub async fn resolve_postgres(binary_name: &str) -> Result<String> {
+    // 1. Already on PATH?
+    if let Ok(path) = which::which(binary_name) {
         return Ok(path.to_string_lossy().to_string());
     }
 
-    // Check in ~/.cooper/bin/
-    let managed = bin_dir().join("pg_ctl");
+    // 2. Already in ~/.cooper/pg/bin/?
+    let pg_dir = dirs_home().join(".cooper").join("pg");
+    let managed = pg_dir.join("bin").join(binary_name);
     if managed.exists() {
         return Ok(managed.to_string_lossy().to_string());
     }
 
-    // Postgres is harder to auto-download due to platform-specific builds.
-    // Recommend installation instead.
-    Err(anyhow::anyhow!(
-        "PostgreSQL not found. Install it:\n  macOS: brew install postgresql@17\n  Linux: sudo apt install postgresql"
-    ))
+    // 3. Auto-download the full Postgres distribution
+    tracing::info!("Downloading PostgreSQL (first run only)...");
+    download_postgres(&pg_dir).await?;
+
+    if managed.exists() {
+        Ok(managed.to_string_lossy().to_string())
+    } else {
+        Err(anyhow::anyhow!(
+            "PostgreSQL download completed but {} not found at {}",
+            binary_name,
+            managed.display()
+        ))
+    }
+}
+
+/// Download pre-built PostgreSQL binaries from theseus-rs/postgresql-binaries.
+/// Extracts the full distribution (bin/, lib/, share/) to ~/.cooper/pg/.
+async fn download_postgres(pg_dir: &Path) -> Result<()> {
+    let version = "17.4.0";
+
+    let triple = if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        "aarch64-apple-darwin"
+    } else if cfg!(target_os = "macos") && cfg!(target_arch = "x86_64") {
+        "x86_64-apple-darwin"
+    } else if cfg!(target_os = "linux") && cfg!(target_arch = "aarch64") {
+        "aarch64-unknown-linux-gnu"
+    } else if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
+        "x86_64-unknown-linux-gnu"
+    } else {
+        return Err(anyhow::anyhow!("Unsupported platform for PostgreSQL auto-download"));
+    };
+
+    let url = format!(
+        "https://github.com/theseus-rs/postgresql-binaries/releases/download/{version}/postgresql-{version}-{triple}.tar.gz"
+    );
+
+    tracing::info!("  Fetching {url}");
+    let response = reqwest::get(&url)
+        .await
+        .context(format!("Failed to download PostgreSQL from {url}"))?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "PostgreSQL download failed: HTTP {} for {url}",
+            response.status()
+        ));
+    }
+
+    let bytes = response.bytes().await?;
+
+    // Extract to a temp dir first, then move
+    let tmp_dir = tempfile::tempdir().context("Failed to create temp dir")?;
+    let archive_path = tmp_dir.path().join("pg.tar.gz");
+    std::fs::write(&archive_path, &bytes)?;
+
+    let file = std::fs::File::open(&archive_path)?;
+    let gz = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(gz);
+    archive.unpack(tmp_dir.path())?;
+
+    // Find the extracted directory (postgresql-{version}-{triple}/)
+    let prefix = format!("postgresql-{version}-{triple}");
+    let extracted = tmp_dir.path().join(&prefix);
+
+    if !extracted.exists() {
+        // Try to find any postgresql-* directory
+        let mut found = None;
+        for entry in std::fs::read_dir(tmp_dir.path())? {
+            let entry = entry?;
+            if entry.file_name().to_string_lossy().starts_with("postgresql-") {
+                found = Some(entry.path());
+                break;
+            }
+        }
+        let extracted = found.ok_or_else(|| {
+            anyhow::anyhow!("Could not find PostgreSQL directory in archive")
+        })?;
+        std::fs::create_dir_all(pg_dir)?;
+        // Move bin/, lib/, share/ into pg_dir
+        for subdir in &["bin", "lib", "share"] {
+            let src = extracted.join(subdir);
+            let dst = pg_dir.join(subdir);
+            if src.exists() {
+                if dst.exists() {
+                    std::fs::remove_dir_all(&dst)?;
+                }
+                rename_or_copy_dir(&src, &dst)?;
+            }
+        }
+    } else {
+        std::fs::create_dir_all(pg_dir)?;
+        for subdir in &["bin", "lib", "share"] {
+            let src = extracted.join(subdir);
+            let dst = pg_dir.join(subdir);
+            if src.exists() {
+                if dst.exists() {
+                    std::fs::remove_dir_all(&dst)?;
+                }
+                rename_or_copy_dir(&src, &dst)?;
+            }
+        }
+    }
+
+    // Set executable permissions on all binaries
+    if let Ok(entries) = std::fs::read_dir(pg_dir.join("bin")) {
+        for entry in entries.flatten() {
+            let _ = set_executable(&entry.path());
+        }
+    }
+
+    tracing::info!("  Installed PostgreSQL {} to {}", version, pg_dir.display());
+    Ok(())
+}
+
+/// Move a directory, falling back to recursive copy if rename fails (cross-device).
+fn rename_or_copy_dir(src: &Path, dst: &Path) -> Result<()> {
+    if std::fs::rename(src, dst).is_ok() {
+        return Ok(());
+    }
+    // Fallback: recursive copy
+    copy_dir_recursive(src, dst)
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
 }
 
 async fn download_binary(spec: &BinarySpec) -> Result<()> {

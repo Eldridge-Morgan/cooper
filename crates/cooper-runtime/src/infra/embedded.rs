@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::{Child, Command};
 
-use super::binaries::resolve_binary;
+use super::binaries::{resolve_binary, resolve_postgres, dirs_home};
 
 /// Manages embedded infrastructure for local development.
 pub struct EmbeddedInfra {
@@ -103,8 +103,22 @@ impl EmbeddedInfra {
         // Find a free port
         let port = find_free_port().await?;
 
-        // Check if pg_ctl is available
-        let pg_ctl = find_binary("pg_ctl")?;
+        // Resolve pg_ctl — checks PATH, ~/.cooper/pg/bin/, then auto-downloads
+        let pg_ctl = resolve_postgres("pg_ctl").await?;
+
+        // If using managed Postgres from ~/.cooper/pg/, set library path
+        let cooper_pg_lib = dirs_home().join(".cooper").join("pg").join("lib");
+        if cooper_pg_lib.exists() {
+            let lib_key = if cfg!(target_os = "macos") { "DYLD_LIBRARY_PATH" } else { "LD_LIBRARY_PATH" };
+            let existing = std::env::var(lib_key).unwrap_or_default();
+            let new_val = if existing.is_empty() {
+                cooper_pg_lib.to_string_lossy().to_string()
+            } else {
+                format!("{}:{}", cooper_pg_lib.to_string_lossy(), existing)
+            };
+            // SAFETY: called in single-threaded startup before workers spawn
+            unsafe { std::env::set_var(lib_key, &new_val); }
+        }
 
         // Initialize if needed. We use a marker file to ensure the data dir
         // was initialized with our "cooper" superuser. If the marker is missing
@@ -116,7 +130,7 @@ impl EmbeddedInfra {
             let _ = std::fs::remove_dir_all(&data_path);
         }
         if !data_path.join("PG_VERSION").exists() {
-            let initdb = find_binary("initdb")?;
+            let initdb = resolve_postgres("initdb").await?;
             let status = Command::new(&initdb)
                 .args(["--pgdata", data_path.to_str().unwrap()])
                 .args(["--auth", "trust"])
@@ -152,7 +166,8 @@ impl EmbeddedInfra {
             if check_port_open(port).await {
                 // Create default database (connect via socket dir)
                 let socket_dir = pg_dir.to_str().unwrap();
-                let _ = Command::new(find_binary("createdb").unwrap_or_default())
+                let createdb = resolve_postgres("createdb").await.unwrap_or_default();
+                let _ = Command::new(&createdb)
                     .args(["-p", &port.to_string()])
                     .args(["-h", socket_dir])
                     .args(["-U", "cooper"])
@@ -245,7 +260,7 @@ impl EmbeddedInfra {
         let mut count = 0u32;
         for entry in &files {
             let sql = std::fs::read_to_string(entry.path())?;
-            let psql = find_binary("psql").unwrap_or_else(|_| "psql".into());
+            let psql = resolve_postgres("psql").await.unwrap_or_else(|_| "psql".into());
 
             let pg_dir = self.data_dir.join("postgres");
             let socket_dir = pg_dir.to_str().unwrap_or("/tmp");
@@ -370,7 +385,7 @@ async fn check_port_open(port: u16) -> bool {
 /// Tries to connect as the "cooper" user with no password and run a simple query.
 /// Returns false if auth fails, role doesn't exist, or connection is refused.
 async fn verify_postgres(port: u16) -> bool {
-    let psql = match find_binary("psql") {
+    let psql = match resolve_postgres("psql").await {
         Ok(p) => p,
         Err(_) => return false,
     };
