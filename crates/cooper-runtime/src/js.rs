@@ -126,18 +126,11 @@ impl JsRuntime {
     }
 
     /// Invalidate all module caches (for hot reload).
+    /// Waits for each worker to confirm invalidation.
     pub async fn invalidate(&self) -> Result<()> {
-        for worker in &self.workers {
-            let id = self.request_id.fetch_add(1, Ordering::SeqCst);
-            let req = RpcRequest {
-                id,
-                method: "invalidate".to_string(),
-                params: Value::Null,
-            };
-
-            let mut w = worker.lock().await;
-            let line = serde_json::to_string(&req)? + "\n";
-            w.stdin.write_all(line.as_bytes()).await?;
+        // Use rpc_call for each worker to wait for confirmation
+        for _worker in &self.workers {
+            self.rpc_call("invalidate", Value::Null).await?;
         }
         Ok(())
     }
@@ -170,11 +163,7 @@ impl JsRuntime {
 
     async fn rpc_call(&self, method: &str, params: Value) -> Result<RpcResult> {
         if self.workers.is_empty() {
-            // Fallback for when workers haven't started yet
-            return Ok(RpcResult::Success(serde_json::json!({
-                "_cooper_debug": true,
-                "message": "JS workers not started — call runtime.start() first",
-            })));
+            return Err(anyhow::anyhow!("JS workers not started"));
         }
 
         let worker_idx =
@@ -313,6 +302,10 @@ async fn spawn_worker(
     let pending: Arc<Mutex<std::collections::HashMap<u64, oneshot::Sender<RpcResponse>>>> =
         Arc::new(Mutex::new(std::collections::HashMap::new()));
 
+    // Channel to signal worker readiness
+    let (ready_tx, ready_rx) = oneshot::channel::<()>();
+    let mut ready_tx = Some(ready_tx);
+
     // Spawn a reader task that routes responses to pending callers
     let pending_clone = Arc::clone(&pending);
     tokio::spawn(async move {
@@ -326,22 +319,32 @@ async fn spawn_worker(
 
             match serde_json::from_str::<RpcResponse>(&line) {
                 Ok(response) => {
+                    if response.id == 0 {
+                        // Ready signal from worker
+                        if let Some(tx) = ready_tx.take() {
+                            let _ = tx.send(());
+                        }
+                        continue;
+                    }
                     let mut pending = pending_clone.lock().await;
                     if let Some(tx) = pending.remove(&response.id) {
                         let _ = tx.send(response);
                     }
-                    // id=0 responses are system messages (ready signal, etc.)
                 }
                 Err(e) => {
                     tracing::warn!("Failed to parse worker response: {e}: {line}");
                 }
             }
         }
+        // Worker stdout closed — worker is dead
+        tracing::error!("JS worker process exited unexpectedly");
     });
 
-    // Wait for the ready signal
-    // (The reader task above will consume it, but since id=0 has no pending sender, it's fine)
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    // Wait for the actual ready signal (up to 10s)
+    tokio::time::timeout(std::time::Duration::from_secs(10), ready_rx)
+        .await
+        .map_err(|_| anyhow::anyhow!("JS worker did not send ready signal within 10s"))?
+        .map_err(|_| anyhow::anyhow!("JS worker channel closed before ready"))?;
 
     Ok(Worker {
         stdin,

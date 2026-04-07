@@ -61,6 +61,7 @@ impl EmbeddedInfra {
         }
 
         // Start each service (reuse if already running)
+        let pg_container = self.container_name("postgres");
         match self.ensure_container("postgres", PG_IMAGE, 5432, &[
             "-e", "POSTGRES_USER=cooper",
             "-e", "POSTGRES_HOST_AUTH_METHOD=trust",
@@ -68,10 +69,12 @@ impl EmbeddedInfra {
         ]).await {
             Ok(port) => {
                 self.pg_port = port;
-                // Wait for Postgres to actually accept connections
-                if wait_for_postgres(port).await {
+                // Wait for Postgres inside the container to accept connections
+                if wait_for_postgres(&pg_container).await {
                     // Create cooper_main database if it doesn't exist
-                    create_database(port, "cooper_main").await;
+                    if let Err(e) = create_database(&pg_container, "cooper_main").await {
+                        tracing::warn!("Failed to create database: {e}");
+                    }
                     status.postgres = ServiceStatus::Running(port);
                 } else {
                     status.postgres = ServiceStatus::Unavailable("Postgres not ready".into());
@@ -189,10 +192,38 @@ impl EmbeddedInfra {
     }
 
     /// Run SQL migration files against Postgres via direct TCP connection.
+    /// Run SQL migration files against Postgres.
+    /// Tracks applied migrations in a `_cooper_migrations` table to avoid re-running.
     pub async fn run_migrations(&self, migrations_dir: &Path) -> Result<u32> {
         if !migrations_dir.exists() {
             return Ok(0);
         }
+
+        let name = self.container_name("postgres");
+
+        // Ensure migrations tracking table exists
+        let _ = Command::new("docker")
+            .args(["exec", "-i", &name, "psql", "-U", "cooper", "-d", "cooper_main", "-c",
+                "CREATE TABLE IF NOT EXISTS _cooper_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT NOW())"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+
+        // Get already-applied migrations
+        let applied_output = Command::new("docker")
+            .args(["exec", "-i", &name, "psql", "-U", "cooper", "-d", "cooper_main",
+                "-tAc", "SELECT filename FROM _cooper_migrations ORDER BY filename"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .await?;
+
+        let applied: std::collections::HashSet<String> = String::from_utf8_lossy(&applied_output.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
 
         let mut files: Vec<_> = std::fs::read_dir(migrations_dir)?
             .filter_map(|e| e.ok())
@@ -206,26 +237,47 @@ impl EmbeddedInfra {
         files.sort_by_key(|e| e.file_name());
 
         let mut count = 0u32;
-        let name = self.container_name("postgres");
 
         for entry in &files {
-            let sql = std::fs::read_to_string(entry.path())?;
-            // Use docker exec with psql inside the container
-            let status = Command::new("docker")
-                .args([
-                    "exec", "-i", &name,
-                    "psql", "-U", "cooper", "-d", "cooper_main",
-                    "-c", &sql,
-                ])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .await;
+            let filename = entry.file_name().to_string_lossy().to_string();
 
-            if let Ok(s) = status {
-                if s.success() {
-                    count += 1;
-                }
+            // Skip already-applied migrations
+            if applied.contains(&filename) {
+                continue;
+            }
+
+            let sql = std::fs::read_to_string(entry.path())?;
+
+            // Run migration via stdin (handles complex SQL with dollar-quoting)
+            let mut child = Command::new("docker")
+                .args(["exec", "-i", &name, "psql", "-U", "cooper", "-d", "cooper_main", "-v", "ON_ERROR_STOP=1"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()?;
+
+            if let Some(mut stdin) = child.stdin.take() {
+                use tokio::io::AsyncWriteExt;
+                stdin.write_all(sql.as_bytes()).await?;
+                drop(stdin);
+            }
+
+            let output = child.wait_with_output().await?;
+
+            if output.status.success() {
+                // Record as applied
+                let _ = Command::new("docker")
+                    .args(["exec", "-i", &name, "psql", "-U", "cooper", "-d", "cooper_main",
+                        "-c", &format!("INSERT INTO _cooper_migrations (filename) VALUES ('{filename}') ON CONFLICT DO NOTHING")])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .await;
+                count += 1;
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                tracing::error!("Migration {} failed: {}", filename, stderr.trim());
+                return Err(anyhow::anyhow!("Migration {} failed: {}", filename, stderr.trim()));
             }
         }
 
@@ -316,15 +368,14 @@ async fn inspect_container(name: &str) -> ContainerState {
     ContainerState::Stopped
 }
 
-// --- Database creation via TCP ---
+// --- Database readiness and creation via docker exec ---
 
-/// Wait for Postgres to accept real connections (wire protocol check, not just port).
-async fn wait_for_postgres(port: u16) -> bool {
+/// Wait for Postgres inside the container to accept connections.
+/// Uses `docker exec` into the running container — no --network=host needed.
+async fn wait_for_postgres(container_name: &str) -> bool {
     for _ in 0..60 {
-        // Try connecting with psql via Docker
         let result = Command::new("docker")
-            .args(["run", "--rm", "--network=host", PG_IMAGE,
-                   "pg_isready", "-h", "localhost", "-p", &port.to_string(), "-U", "cooper"])
+            .args(["exec", container_name, "pg_isready", "-U", "cooper"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
@@ -340,34 +391,35 @@ async fn wait_for_postgres(port: u16) -> bool {
     false
 }
 
-/// Create a database if it doesn't exist.
-async fn create_database(port: u16, db_name: &str) {
-    // Use the running postgres container to create the database
-    // psql inside the container connects via localhost
+/// Create a database if it doesn't exist, using docker exec.
+async fn create_database(container_name: &str, db_name: &str) -> Result<()> {
     let check = Command::new("docker")
-        .args(["run", "--rm", "--network=host", PG_IMAGE,
-               "psql", "-h", "localhost", "-p", &port.to_string(),
-               "-U", "cooper", "-d", "postgres",
+        .args(["exec", container_name,
+               "psql", "-U", "cooper", "-d", "postgres",
                "-tAc", &format!("SELECT 1 FROM pg_database WHERE datname='{db_name}'")])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
-        .await;
+        .await?;
 
-    let exists = check
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().contains('1'))
-        .unwrap_or(false);
+    let exists = String::from_utf8_lossy(&check.stdout).trim().contains('1');
 
     if !exists {
-        let _ = Command::new("docker")
-            .args(["run", "--rm", "--network=host", PG_IMAGE,
-                   "createdb", "-h", "localhost", "-p", &port.to_string(),
-                   "-U", "cooper", db_name])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
+        let output = Command::new("docker")
+            .args(["exec", container_name,
+                   "createdb", "-U", "cooper", db_name])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow::anyhow!("createdb failed: {}", stderr.trim()));
+        }
     }
+
+    Ok(())
 }
 
 async fn wait_for_port(port: u16, timeout_secs: u64) -> bool {

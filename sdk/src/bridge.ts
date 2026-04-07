@@ -23,6 +23,7 @@ const projectRoot = process.env.COOPER_PROJECT_ROOT ?? process.cwd();
 
 // Module cache — avoid re-importing on every request
 const moduleCache = new Map<string, any>();
+let cacheBustVersion = 0;
 
 async function loadModule(sourcePath: string): Promise<any> {
   if (moduleCache.has(sourcePath)) return moduleCache.get(sourcePath)!;
@@ -31,7 +32,9 @@ async function loadModule(sourcePath: string): Promise<any> {
   const fileUrl = pathToFileURL(fullPath).href;
 
   try {
-    const mod = await import(fileUrl);
+    // Cache-bust with version param to bypass Node.js ESM module cache on reload
+    const importUrl = cacheBustVersion > 0 ? `${fileUrl}?v=${cacheBustVersion}` : fileUrl;
+    const mod = await import(importUrl);
     moduleCache.set(sourcePath, mod);
     return mod;
   } catch (err: any) {
@@ -195,8 +198,11 @@ async function handleRequest(req: RPCRequest): Promise<RPCResponse> {
         result = { pong: true, pid: process.pid };
         break;
       case "invalidate":
-        // Clear module cache for hot reload
+        // Clear module cache and bump version to bust ESM import cache
         moduleCache.clear();
+        cacheBustVersion++;
+        // Re-preload side effects (auth handlers, middleware)
+        await preloadSideEffects();
         result = { ok: true };
         break;
       default:
@@ -224,13 +230,15 @@ const rl = createInterface({ input: process.stdin });
 rl.on("line", async (line) => {
   if (!line.trim()) return;
 
+  let reqId = 0;
   try {
     const req: RPCRequest = JSON.parse(line);
+    reqId = req.id;
     const res = await handleRequest(req);
     process.stdout.write(JSON.stringify(res) + "\n");
   } catch (err: any) {
     process.stdout.write(
-      JSON.stringify({ id: 0, error: { code: "INTERNAL", message: `Bridge parse error: ${err.message}` } }) + "\n"
+      JSON.stringify({ id: reqId, error: { code: "INTERNAL", message: `Bridge error: ${err.message}`, statusCode: 500 } }) + "\n"
     );
   }
 });

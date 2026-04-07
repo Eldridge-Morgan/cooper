@@ -175,9 +175,21 @@ async fn run_single_app(project_root: PathBuf, port: u16) -> Result<()> {
         }
     });
 
-    let result = server_handle.await?;
-    infra.stop().await;
-    result
+    // Graceful shutdown on Ctrl+C
+    let shutdown_infra = infra.pg_port; // just to check infra is alive
+    let _ = shutdown_infra; // suppress unused warning
+    tokio::select! {
+        result = server_handle => {
+            infra.stop().await;
+            result?
+        }
+        _ = tokio::signal::ctrl_c() => {
+            eprintln!("\n  {} Shutting down...", "→".cyan());
+            infra.stop().await;
+            eprintln!("  {} Stopped", "✓".green());
+            Ok(())
+        }
+    }
 }
 
 /// Run all apps in a Cooper workspace.
