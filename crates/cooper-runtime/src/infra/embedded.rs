@@ -1,32 +1,53 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command;
 
-/// Manages local development infrastructure via Docker Compose.
-/// Starts Postgres, NATS (with JetStream), and Valkey containers.
+const PG_IMAGE: &str = "postgres:17-alpine";
+const NATS_IMAGE: &str = "nats:2.10-alpine";
+const VALKEY_IMAGE: &str = "valkey/valkey:8-alpine";
+
+/// Manages local development infrastructure via Docker containers.
+/// Each service gets a deterministic container name per project so containers
+/// are reused across restarts (like Encore).
 pub struct EmbeddedInfra {
     pub pg_port: u16,
     pub nats_port: u16,
     pub valkey_port: u16,
+    project_id: String,
     data_dir: PathBuf,
-    compose_file: PathBuf,
 }
 
 impl EmbeddedInfra {
     pub fn new(project_root: &Path) -> Self {
-        let data_dir = project_root.join(".cooper/data");
-        let compose_file = data_dir.join("docker-compose.yml");
+        // Derive a stable project ID from the directory name
+        let project_id = project_root
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+            .replace(|c: char| !c.is_alphanumeric() && c != '-', "-")
+            .to_lowercase();
+
         Self {
-            pg_port: 5432,
-            nats_port: 4222,
-            valkey_port: 6379,
-            data_dir,
-            compose_file,
+            pg_port: 0,
+            nats_port: 0,
+            valkey_port: 0,
+            project_id,
+            data_dir: project_root.join(".cooper/data"),
         }
     }
 
-    /// Start all infrastructure via Docker Compose.
+    fn container_name(&self, service: &str) -> String {
+        format!("cooper-{}-{}", self.project_id, service)
+    }
+
+    fn volume_name(&self, service: &str) -> String {
+        format!("cooper-{}-{}-data", self.project_id, service)
+    }
+
+    /// Start all infrastructure.
+    /// Reuses running containers, restarts stopped ones, creates new if needed.
     pub async fn start(&mut self) -> Result<InfraStatus> {
         std::fs::create_dir_all(&self.data_dir)?;
 
@@ -39,18 +60,116 @@ impl EmbeddedInfra {
             ));
         }
 
-        // Find free ports
-        self.pg_port = find_free_port().await?;
-        self.nats_port = find_free_port().await?;
-        self.valkey_port = find_free_port().await?;
+        // Start each service (reuse if already running)
+        match self.ensure_container("postgres", PG_IMAGE, 5432, &[
+            "-e", "POSTGRES_USER=cooper",
+            "-e", "POSTGRES_HOST_AUTH_METHOD=trust",
+            "-v", &format!("{}:/var/lib/postgresql/data", self.volume_name("pg")),
+        ]).await {
+            Ok(port) => {
+                self.pg_port = port;
+                // Wait for Postgres to actually accept connections
+                if wait_for_postgres(port).await {
+                    // Create cooper_main database if it doesn't exist
+                    create_database(port, "cooper_main").await;
+                    status.postgres = ServiceStatus::Running(port);
+                } else {
+                    status.postgres = ServiceStatus::Unavailable("Postgres not ready".into());
+                }
+            }
+            Err(e) => status.postgres = ServiceStatus::Unavailable(e.to_string()),
+        }
 
-        // Generate docker-compose.yml
-        let compose = generate_compose(self.pg_port, self.nats_port, self.valkey_port);
-        std::fs::write(&self.compose_file, &compose)?;
+        match self.ensure_container("nats", NATS_IMAGE, 4222, &[
+            "-v", &format!("{}:/data", self.volume_name("nats")),
+            // NATS command args passed after image
+        ]).await {
+            Ok(port) => {
+                self.nats_port = port;
+                if wait_for_port(port, 15).await {
+                    status.nats = ServiceStatus::Running(port);
+                } else {
+                    status.nats = ServiceStatus::Unavailable("NATS not ready".into());
+                }
+            }
+            Err(e) => status.nats = ServiceStatus::Unavailable(e.to_string()),
+        }
 
-        // Start containers
+        match self.ensure_container("valkey", VALKEY_IMAGE, 6379, &[
+        ]).await {
+            Ok(port) => {
+                self.valkey_port = port;
+                if wait_for_port(port, 15).await {
+                    status.valkey = ServiceStatus::Running(port);
+                } else {
+                    status.valkey = ServiceStatus::Unavailable("Valkey not ready".into());
+                }
+            }
+            Err(e) => status.valkey = ServiceStatus::Unavailable(e.to_string()),
+        }
+
+        Ok(status)
+    }
+
+    /// Ensure a container is running. Returns the host port.
+    /// Three states: Running → return port, Stopped → start + return port, NotFound → create.
+    async fn ensure_container(
+        &self,
+        service: &str,
+        image: &str,
+        container_port: u16,
+        extra_args: &[&str],
+    ) -> Result<u16> {
+        let name = self.container_name(service);
+
+        // Check container state
+        match inspect_container(&name).await {
+            ContainerState::Running(port) => {
+                tracing::debug!("Container {name} already running on port {port}");
+                return Ok(port);
+            }
+            ContainerState::Stopped => {
+                // Restart it
+                let output = Command::new("docker")
+                    .args(["start", &name])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .await?;
+
+                if !output.success() {
+                    // Remove and recreate
+                    let _ = Command::new("docker").args(["rm", "-f", &name]).stdout(Stdio::null()).stderr(Stdio::null()).status().await;
+                } else {
+                    // Get the port after restart
+                    if let ContainerState::Running(port) = inspect_container(&name).await {
+                        return Ok(port);
+                    }
+                }
+            }
+            ContainerState::NotFound => {}
+        }
+
+        // Create new container
+        let mut args = vec![
+            "run".to_string(), "-d".to_string(),
+            "--name".to_string(), name.clone(),
+            "-p".to_string(), format!("0:{container_port}"), // Docker assigns random host port
+        ];
+
+        for arg in extra_args {
+            args.push(arg.to_string());
+        }
+
+        args.push(image.to_string());
+
+        // Add NATS-specific command args after image
+        if service == "nats" {
+            args.extend(["--jetstream".to_string(), "--store_dir".to_string(), "/data".to_string()]);
+        }
+
         let output = Command::new("docker")
-            .args(["compose", "-f", self.compose_file.to_str().unwrap(), "up", "-d", "--wait"])
+            .args(&args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -58,85 +177,18 @@ impl EmbeddedInfra {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            // Try `docker-compose` (v1) if `docker compose` (v2) fails
-            let output_v1 = Command::new("docker-compose")
-                .args(["-f", self.compose_file.to_str().unwrap(), "up", "-d"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output()
-                .await;
-
-            match output_v1 {
-                Ok(o) if o.status.success() => {}
-                _ => {
-                    return Err(anyhow::anyhow!(
-                        "Failed to start Docker containers: {}",
-                        stderr.trim()
-                    ));
-                }
-            }
+            return Err(anyhow::anyhow!("Failed to create {service} container: {}", stderr.trim()));
         }
 
-        // Wait for services to be ready
-        let timeout = std::time::Duration::from_secs(30);
-        let start = std::time::Instant::now();
-
-        // Wait for Postgres
-        while start.elapsed() < timeout {
-            if check_port_open(self.pg_port).await {
-                status.postgres = ServiceStatus::Running(self.pg_port);
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        // Read the assigned port
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        match inspect_container(&name).await {
+            ContainerState::Running(port) => Ok(port),
+            _ => Err(anyhow::anyhow!("Container {name} created but not running")),
         }
-        if !matches!(status.postgres, ServiceStatus::Running(_)) {
-            status.postgres = ServiceStatus::Unavailable("Postgres container not ready".to_string());
-        }
-
-        // Wait for NATS
-        while start.elapsed() < timeout {
-            if check_port_open(self.nats_port).await {
-                status.nats = ServiceStatus::Running(self.nats_port);
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        }
-        if !matches!(status.nats, ServiceStatus::Running(_)) {
-            status.nats = ServiceStatus::Unavailable("NATS container not ready".to_string());
-        }
-
-        // Wait for Valkey
-        while start.elapsed() < timeout {
-            if check_port_open(self.valkey_port).await {
-                status.valkey = ServiceStatus::Running(self.valkey_port);
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        }
-        if !matches!(status.valkey, ServiceStatus::Running(_)) {
-            status.valkey = ServiceStatus::Unavailable("Valkey container not ready".to_string());
-        }
-
-        // Create the cooper_main database (Postgres is ready, create db if not exists)
-        if matches!(status.postgres, ServiceStatus::Running(_)) {
-            // Wait a bit more for Postgres to accept connections
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let _ = Command::new("docker")
-                .args([
-                    "compose", "-f", self.compose_file.to_str().unwrap(),
-                    "exec", "-T", "postgres",
-                    "createdb", "-U", "cooper", "cooper_main",
-                ])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .await;
-        }
-
-        Ok(status)
     }
 
-    /// Run SQL migration files against Postgres.
+    /// Run SQL migration files against Postgres via direct TCP connection.
     pub async fn run_migrations(&self, migrations_dir: &Path) -> Result<u32> {
         if !migrations_dir.exists() {
             return Ok(0);
@@ -154,13 +206,16 @@ impl EmbeddedInfra {
         files.sort_by_key(|e| e.file_name());
 
         let mut count = 0u32;
+        let name = self.container_name("postgres");
+
         for entry in &files {
             let sql = std::fs::read_to_string(entry.path())?;
+            // Use docker exec with psql inside the container
             let status = Command::new("docker")
                 .args([
-                    "compose", "-f", self.compose_file.to_str().unwrap(),
-                    "exec", "-T", "postgres",
-                    "psql", "-U", "cooper", "-d", "cooper_main", "-c", &sql,
+                    "exec", "-i", &name,
+                    "psql", "-U", "cooper", "-d", "cooper_main",
+                    "-c", &sql,
                 ])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -177,11 +232,12 @@ impl EmbeddedInfra {
         Ok(count)
     }
 
-    /// Stop all containers.
+    /// Stop all containers (keep volumes for data persistence).
     pub async fn stop(&mut self) {
-        if self.compose_file.exists() {
+        for service in &["postgres", "nats", "valkey"] {
+            let name = self.container_name(service);
             let _ = Command::new("docker")
-                .args(["compose", "-f", self.compose_file.to_str().unwrap(), "down"])
+                .args(["stop", &name])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()
@@ -192,10 +248,11 @@ impl EmbeddedInfra {
 
 impl Drop for EmbeddedInfra {
     fn drop(&mut self) {
-        // Best-effort cleanup — stop containers
-        if self.compose_file.exists() {
+        // Stop containers but keep volumes (data persists)
+        for service in &["postgres", "nats", "valkey"] {
+            let name = self.container_name(service);
             let _ = std::process::Command::new("docker")
-                .args(["compose", "-f", self.compose_file.to_str().unwrap(), "down"])
+                .args(["stop", &name])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status();
@@ -203,54 +260,139 @@ impl Drop for EmbeddedInfra {
     }
 }
 
-fn generate_compose(pg_port: u16, nats_port: u16, valkey_port: u16) -> String {
-    format!(
-        r#"# Auto-generated by Cooper — do not edit
-services:
-  postgres:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: cooper
-      POSTGRES_HOST_AUTH_METHOD: trust
-    ports:
-      - "{pg_port}:5432"
-    volumes:
-      - cooper-pg-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cooper"]
-      interval: 1s
-      timeout: 3s
-      retries: 10
+// --- Container inspection ---
 
-  nats:
-    image: nats:2.10-alpine
-    command: ["--jetstream", "--store_dir", "/data"]
-    ports:
-      - "{nats_port}:4222"
-    volumes:
-      - cooper-nats-data:/data
-    healthcheck:
-      test: ["CMD", "nats-server", "--help"]
-      interval: 1s
-      timeout: 3s
-      retries: 10
-
-  valkey:
-    image: valkey/valkey:8-alpine
-    ports:
-      - "{valkey_port}:6379"
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 1s
-      timeout: 3s
-      retries: 10
-
-volumes:
-  cooper-pg-data:
-  cooper-nats-data:
-"#
-    )
+enum ContainerState {
+    Running(u16),
+    Stopped,
+    NotFound,
 }
+
+async fn inspect_container(name: &str) -> ContainerState {
+    let output = Command::new("docker")
+        .args(["inspect", "--format", "{{.State.Running}}|{{json .NetworkSettings.Ports}}", name])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await;
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return ContainerState::NotFound,
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = stdout.trim();
+
+    let parts: Vec<&str> = stdout.splitn(2, '|').collect();
+    if parts.len() != 2 {
+        return ContainerState::NotFound;
+    }
+
+    let running = parts[0] == "true";
+    if !running {
+        return ContainerState::Stopped;
+    }
+
+    // Parse port mapping from JSON like {"5432/tcp":[{"HostIp":"0.0.0.0","HostPort":"55123"}]}
+    if let Ok(ports) = serde_json::from_str::<serde_json::Value>(parts[1]) {
+        if let Some(obj) = ports.as_object() {
+            for (_key, bindings) in obj {
+                if let Some(arr) = bindings.as_array() {
+                    for binding in arr {
+                        if let Some(port_str) = binding.get("HostPort").and_then(|v| v.as_str()) {
+                            if let Ok(port) = port_str.parse::<u16>() {
+                                if port > 0 {
+                                    return ContainerState::Running(port);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    ContainerState::Stopped
+}
+
+// --- Database creation via TCP ---
+
+/// Wait for Postgres to accept real connections (wire protocol check, not just port).
+async fn wait_for_postgres(port: u16) -> bool {
+    for _ in 0..60 {
+        // Try connecting with psql via Docker
+        let result = Command::new("docker")
+            .args(["run", "--rm", "--network=host", PG_IMAGE,
+                   "pg_isready", "-h", "localhost", "-p", &port.to_string(), "-U", "cooper"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+
+        if let Ok(s) = result {
+            if s.success() {
+                return true;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    false
+}
+
+/// Create a database if it doesn't exist.
+async fn create_database(port: u16, db_name: &str) {
+    // Use the running postgres container to create the database
+    // psql inside the container connects via localhost
+    let check = Command::new("docker")
+        .args(["run", "--rm", "--network=host", PG_IMAGE,
+               "psql", "-h", "localhost", "-p", &port.to_string(),
+               "-U", "cooper", "-d", "postgres",
+               "-tAc", &format!("SELECT 1 FROM pg_database WHERE datname='{db_name}'")])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await;
+
+    let exists = check
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().contains('1'))
+        .unwrap_or(false);
+
+    if !exists {
+        let _ = Command::new("docker")
+            .args(["run", "--rm", "--network=host", PG_IMAGE,
+                   "createdb", "-h", "localhost", "-p", &port.to_string(),
+                   "-U", "cooper", db_name])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+    }
+}
+
+async fn wait_for_port(port: u16, timeout_secs: u64) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    while std::time::Instant::now() < deadline {
+        if tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await.is_ok() {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    false
+}
+
+async fn docker_available() -> bool {
+    Command::new("docker")
+        .args(["info"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+// --- Status types ---
 
 #[derive(Default)]
 pub struct InfraStatus {
@@ -294,28 +436,4 @@ impl ServiceStatus {
     pub fn is_available(&self) -> bool {
         !matches!(self, ServiceStatus::Unavailable(_))
     }
-}
-
-async fn docker_available() -> bool {
-    Command::new("docker")
-        .args(["info"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-async fn find_free_port() -> Result<u16> {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-    let port = listener.local_addr()?.port();
-    drop(listener);
-    Ok(port)
-}
-
-async fn check_port_open(port: u16) -> bool {
-    tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
-        .await
-        .is_ok()
 }
