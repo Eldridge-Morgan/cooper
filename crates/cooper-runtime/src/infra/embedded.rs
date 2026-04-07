@@ -138,16 +138,17 @@ impl EmbeddedInfra {
                 .args(["--username", "cooper"])
                 .args(["--no-locale"])
                 .args(["--encoding", "UTF8"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
             // Set library path for downloaded Postgres
             if cooper_pg_lib.exists() {
                 let lib_key = if cfg!(target_os = "macos") { "DYLD_LIBRARY_PATH" } else { "LD_LIBRARY_PATH" };
                 cmd.env(lib_key, &cooper_pg_lib);
             }
-            let status = cmd.status().await?;
-            if !status.success() {
-                return Err(anyhow::anyhow!("initdb failed"));
+            let output = cmd.output().await?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(anyhow::anyhow!("initdb failed: {}", stderr.trim()));
             }
             // Mark this data dir as initialized with the cooper superuser
             let _ = std::fs::write(&cooper_marker, "cooper");
@@ -159,16 +160,19 @@ impl EmbeddedInfra {
             .args(["start", "-w", "-D", data_path.to_str().unwrap()])
             .args(["-o", &format!("-p {port} -k {}", pg_dir.to_str().unwrap())])
             .args(["-l", pg_dir.join("postgres.log").to_str().unwrap()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         if cooper_pg_lib.exists() {
             let lib_key = if cfg!(target_os = "macos") { "DYLD_LIBRARY_PATH" } else { "LD_LIBRARY_PATH" };
             pg_start.env(lib_key, &cooper_pg_lib);
         }
-        let status = pg_start.status().await?;
+        let output = pg_start.output().await?;
 
-        if !status.success() {
-            return Err(anyhow::anyhow!("pg_ctl start failed"));
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let log_content = std::fs::read_to_string(pg_dir.join("postgres.log")).unwrap_or_default();
+            let log_tail = log_content.lines().rev().take(5).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+            return Err(anyhow::anyhow!("pg_ctl start failed: {} | log: {}", stderr.trim(), log_tail));
         }
 
         // Wait for Postgres to be ready
