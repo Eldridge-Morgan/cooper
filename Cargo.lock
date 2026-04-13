@@ -442,6 +442,7 @@ dependencies = [
  "toml",
  "tracing",
  "uuid",
+ "which",
 ]
 
 [[package]]

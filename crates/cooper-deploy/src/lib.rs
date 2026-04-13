@@ -1,8 +1,10 @@
 pub mod cloud;
+pub mod credentials;
 pub mod diff;
 pub mod providers;
 pub mod provisioner;
 pub mod state;
+pub mod terraform;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,32 @@ impl CloudProvider {
                 "Unknown cloud provider: {}. Use aws, gcp, azure, or fly.",
                 s
             )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ServiceType {
+    Server,     // Container-based: ECS, Cloud Run, Container Apps
+    Serverless, // Function-based: Lambda, Cloud Functions, Azure Functions
+}
+
+impl ServiceType {
+    pub fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "server" => Ok(Self::Server),
+            "serverless" => Ok(Self::Serverless),
+            _ => Err(anyhow::anyhow!(
+                "Unknown service type: {}. Use 'server' or 'serverless'.",
+                s
+            )),
+        }
+    }
+
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::Server => "Server (Container)",
+            Self::Serverless => "Serverless (Function)",
         }
     }
 }

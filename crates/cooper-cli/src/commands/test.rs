@@ -49,7 +49,7 @@ pub async fn run(filter: Option<String>, fail_fast: bool) -> Result<()> {
             for db in &analysis.databases {
                 let env_key = format!("COOPER_DB_{}_URL", db.name.to_uppercase());
                 let url = format!(
-                    "postgres://cooper@localhost:{}/cooper_{}",
+                    "postgres://cooper:cooper@localhost:{}/cooper_{}?sslmode=disable",
                     infra.pg_port, db.name
                 );
                 std::env::set_var(&env_key, &url);

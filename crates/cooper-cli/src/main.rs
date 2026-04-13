@@ -51,13 +51,16 @@ enum Commands {
 
     /// Deploy to cloud
     Deploy {
-        /// Target environment
+        /// Target environment (e.g. prod, staging, dev)
         #[arg(long)]
         env: String,
         /// Cloud provider: aws, gcp, azure, fly
         #[arg(long)]
         cloud: String,
-        /// Show diff and cost estimate without deploying
+        /// Deployment model: server (container, default) or serverless (function)
+        #[arg(long, default_value = "server")]
+        service: String,
+        /// Show Terraform config and cost estimate without deploying
         #[arg(long)]
         dry_run: bool,
         /// Auto-destroy after duration (e.g. "48h")
@@ -228,12 +231,13 @@ async fn main() -> Result<()> {
         Commands::Deploy {
             env,
             cloud,
+            service,
             dry_run,
             auto_destroy_after,
             app,
         } => {
             banner();
-            commands::deploy::run(&env, &cloud, dry_run, auto_destroy_after, app).await
+            commands::deploy::run(&env, &cloud, &service, dry_run, auto_destroy_after, app).await
         }
         Commands::Destroy { env } => {
             banner();
