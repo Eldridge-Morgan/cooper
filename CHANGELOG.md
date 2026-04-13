@@ -2,6 +2,90 @@
 
 All notable changes to Cooper will be documented in this file.
 
+## [0.6.0] - 2026-04-13
+
+### Added
+
+- **Terraform-based deployment** — `cooper deploy` now generates real Terraform HCL instead of calling cloud CLIs directly:
+  - Dynamically generates `main.tf`, `variables.tf`, `outputs.tf`, `provider.tf` based on project analysis
+  - All Terraform files written locally to `.cooper/terraform/{env}/` for full user control
+  - Users can review, edit, and version-control the generated infrastructure before applying
+
+- **`--service` flag** — choose between container and function-based deployment:
+  - `--service server` (default) — container-based: ECS Fargate, Cloud Run, Azure Container Apps
+  - `--service serverless` — function-based: AWS Lambda + API Gateway, GCP Cloud Functions v2, Azure Functions
+  - Database, cache, messaging, and storage resources are the same regardless of service type
+
+- **Six cloud x service mappings** with full Terraform resource generation:
+  - **AWS Server**: VPC, subnets, internet gateway, route tables, security group rules, IAM roles, ECR, ECS Cluster, Fargate task definition + service, CloudWatch log group, RDS, ElastiCache, SNS, SQS, S3
+  - **AWS Serverless**: Same networking + data resources, but Lambda function, API Gateway HTTP API, integration/route/stage, Lambda permissions instead of ECS
+  - **GCP Server**: VPC network, subnet, VPC Access Connector, Cloud Run v2 service, IAM (public invoker), Cloud SQL, Memorystore Redis, Pub/Sub topics, Cloud Tasks queues, GCS bucket, service account
+  - **GCP Serverless**: Same infra, but Cloud Functions v2 with GCS source bucket instead of Cloud Run
+  - **Azure Server**: Resource group, VNet, subnets, Log Analytics, Container Apps environment + app, PostgreSQL Flexible Server, Azure Redis Cache, Service Bus namespace + queues, Blob Storage
+  - **Azure Serverless**: Same infra, but Azure Functions (Linux, Consumption plan) with dedicated storage account instead of Container Apps
+
+- **Interactive deploy workflow** with four options after preview:
+  - **Apply** — proceed with `terraform init` → `plan` → `apply`
+  - **Edit files** — opens `.cooper/terraform/{env}/main.tf` in `$EDITOR`, then confirms
+  - **Show full config** — displays all four `.tf` files inline
+  - **Cancel** — aborts without changes
+
+- **Credential detection and collection** (`credentials.rs`):
+  - **AWS**: checks `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env vars, then `~/.aws/credentials` / `AWS_PROFILE`, prompts interactively if missing
+  - **GCP**: checks `GOOGLE_APPLICATION_CREDENTIALS`, then ADC at `~/.config/gcloud/`, resolves project ID from env or `gcloud config`
+  - **Azure**: checks `ARM_CLIENT_ID`/`ARM_CLIENT_SECRET`/`ARM_TENANT_ID`/`ARM_SUBSCRIPTION_ID`, falls back to `az account show`, prompts for service principal if needed
+  - **Fly.io**: checks `FLY_API_TOKEN`, falls back to `flyctl` auth
+
+- **Terraform executor** — wraps the Terraform CLI lifecycle:
+  - `terraform init` with no-color, no-input flags
+  - `terraform plan -out=tfplan` with change count summary (adds/changes/destroys)
+  - `terraform apply tfplan` with auto-approve on the saved plan
+  - `terraform output -json` to extract connection strings and URLs
+  - `terraform destroy` for environment teardown
+  - All commands receive cloud credentials as environment variables
+
+- **`--dry-run` no longer requires Terraform installed** — generates and previews `.tf` files without needing the Terraform binary, so users can inspect before installing anything
+
+- **`cooper destroy` now uses Terraform** — detects `.cooper/terraform/{env}/terraform.tfstate`, runs `terraform destroy`, and cleans up local state. Falls back gracefully for environments deployed with the old direct provisioner.
+
+- **Resource cost estimates** in preview — shows per-resource `~$X/mo` for known resource types (RDS, ElastiCache, Cloud SQL, Memorystore, Azure PostgreSQL, Azure Redis)
+
+- **Database deduplication** — multiple services referencing the same `database("main", ...)` produce a single RDS/Cloud SQL instance instead of duplicates
+
+- **HCL builder library** (`hcl_builder.rs`) — programmatic Terraform HCL generation:
+  - `TerraformResource` with builder pattern (`.attr()`, `.attr_ref()`, `.attr_block()`)
+  - `TerraformVariable` with type, description, default, sensitive support
+  - `TerraformOutput` with value, description, sensitive support
+  - `TerraformConfig` that writes all four `.tf` files to disk
+  - Proper handling of Terraform references (`${...}`), nested blocks, arrays, and string escaping
+
+### Changed
+
+- `cooper deploy` CLI now accepts `--service <server|serverless>` (default: `server`)
+- Deploy command flow: analyze → generate Terraform → preview → interactive menu → credentials → apply (was: analyze → plan → confirm → direct CLI provisioning)
+- `cooper destroy` checks for Terraform state first, falls back to old behavior for pre-Terraform deployments
+- Estimated cost for the blog example dropped from ~$68/mo to ~$40/mo (more accurate per-resource estimates)
+
+### Architecture
+
+```
+crates/cooper-deploy/src/
+├── terraform/
+│   ├── mod.rs              # Public API: generate() and apply()
+│   ├── generator.rs        # Orchestrator: mapping → TerraformConfig
+│   ├── hcl_builder.rs      # HCL types and serialization
+│   ├── executor.rs         # Terraform CLI wrapper
+│   └── mappings/
+│       ├── mod.rs           # ResourceMapping trait + dispatcher
+│       ├── aws_server.rs    # ECS Fargate
+│       ├── aws_lambda.rs    # Lambda + API Gateway
+│       ├── gcp_server.rs    # Cloud Run
+│       ├── gcp_lambda.rs    # Cloud Functions v2
+│       ├── azure_server.rs  # Container Apps
+│       └── azure_lambda.rs  # Azure Functions
+└── credentials.rs           # Cloud credential detection + prompting
+```
+
 ## [0.5.0] - 2026-04-06
 
 ### Added
