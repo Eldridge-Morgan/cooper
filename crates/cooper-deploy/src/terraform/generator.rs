@@ -167,3 +167,81 @@ fn provider_name(provider: &CloudProvider) -> &str {
         CloudProvider::Fly => "Fly.io",
     }
 }
+
+/// Generate the minimum IAM policy required for this specific project deployment.
+pub fn required_iam_policy(
+    provider: &CloudProvider,
+    service_type: &ServiceType,
+    analysis: &ProjectAnalysis,
+) -> Option<String> {
+    match provider {
+        CloudProvider::Aws => Some(aws_iam_policy(service_type, analysis)),
+        _ => None, // GCP/Azure use different auth models
+    }
+}
+
+fn aws_iam_policy(service_type: &ServiceType, analysis: &ProjectAnalysis) -> String {
+    let mut actions: Vec<&str> = Vec::new();
+
+    // Always needed: networking + logs + IAM roles
+    actions.extend_from_slice(&[
+        "ec2:*",
+        "logs:*",
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:PassRole",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:ListInstanceProfilesForRole",
+        "iam:TagRole",
+        "iam:UntagRole",
+    ]);
+
+    // Compute
+    match service_type {
+        ServiceType::Server => {
+            actions.push("ecs:*");
+            actions.push("ecr:*");
+        }
+        ServiceType::Serverless => {
+            actions.push("lambda:*");
+            actions.push("apigateway:*");
+        }
+    }
+
+    // Conditional on analysis
+    if !analysis.databases.is_empty() {
+        actions.push("rds:*");
+    }
+    if !analysis.topics.is_empty() {
+        actions.push("sns:*");
+    }
+    if !analysis.queues.is_empty() {
+        actions.push("sqs:*");
+    }
+
+    // Storage + cache are always generated
+    actions.push("s3:*");
+    actions.push("elasticache:*");
+
+    // Build JSON policy
+    let actions_json: Vec<String> = actions.iter().map(|a| format!("        \"{}\"", a)).collect();
+    format!(
+        r#"{{
+    "Version": "2012-10-17",
+    "Statement": [
+      {{
+        "Effect": "Allow",
+        "Action": [
+{}
+        ],
+        "Resource": "*"
+      }}
+    ]
+  }}"#,
+        actions_json.join(",\n")
+    )
+}

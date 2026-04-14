@@ -29,7 +29,6 @@ impl ResourceMapping for AwsLambdaMapping {
                 .attr("handler", "index.handler")
                 .attr_ref("role", "aws_iam_role.lambda_exec.arn")
                 .attr("filename", "lambda.zip")
-                .attr("source_code_hash", "${filebase64sha256(\"lambda.zip\")}")
                 .attr("timeout", 30)
                 .attr("memory_size", 512)
                 .attr_block("vpc_config", json!({
@@ -42,7 +41,7 @@ impl ResourceMapping for AwsLambdaMapping {
                         "COOPER_ENV": config.env
                     }
                 }))
-                .attr_block("tags", json!({"ManagedBy": "cooper"})),
+                .attr_map("tags", json!({"ManagedBy": "cooper"})),
 
             // API Gateway HTTP API
             TerraformResource::new("aws_apigatewayv2_api", "api")

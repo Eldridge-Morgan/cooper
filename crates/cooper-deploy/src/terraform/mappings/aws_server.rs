@@ -34,12 +34,12 @@ impl ResourceMapping for AwsServerMapping {
                 .attr("cidr_block", "10.0.0.0/16")
                 .attr("enable_dns_hostnames", true)
                 .attr("enable_dns_support", true)
-                .attr_block("tags", json!({"Name": format!("{prefix}-vpc"), "ManagedBy": "cooper"})),
+                .attr_map("tags", json!({"Name": format!("{prefix}-vpc"), "ManagedBy": "cooper"})),
 
             // Internet Gateway
             TerraformResource::new("aws_internet_gateway", "main")
                 .attr_ref("vpc_id", "aws_vpc.main.id")
-                .attr_block("tags", json!({"Name": format!("{prefix}-igw")})),
+                .attr_map("tags", json!({"Name": format!("{prefix}-igw")})),
 
             // Public Subnet A
             TerraformResource::new("aws_subnet", "public_a")
@@ -47,7 +47,7 @@ impl ResourceMapping for AwsServerMapping {
                 .attr("cidr_block", "10.0.1.0/24")
                 .attr_ref("availability_zone", "\"${var.aws_region}a\"")
                 .attr("map_public_ip_on_launch", true)
-                .attr_block("tags", json!({"Name": format!("{prefix}-public-a")})),
+                .attr_map("tags", json!({"Name": format!("{prefix}-public-a")})),
 
             // Public Subnet B
             TerraformResource::new("aws_subnet", "public_b")
@@ -55,7 +55,7 @@ impl ResourceMapping for AwsServerMapping {
                 .attr("cidr_block", "10.0.2.0/24")
                 .attr_ref("availability_zone", "\"${var.aws_region}b\"")
                 .attr("map_public_ip_on_launch", true)
-                .attr_block("tags", json!({"Name": format!("{prefix}-public-b")})),
+                .attr_map("tags", json!({"Name": format!("{prefix}-public-b")})),
 
             // Route Table
             TerraformResource::new("aws_route_table", "public")
@@ -64,7 +64,7 @@ impl ResourceMapping for AwsServerMapping {
                     "cidr_block": "0.0.0.0/0",
                     "gateway_id": "${aws_internet_gateway.main.id}"
                 }))
-                .attr_block("tags", json!({"Name": format!("{prefix}-public-rt")})),
+                .attr_map("tags", json!({"Name": format!("{prefix}-public-rt")})),
 
             // Route Table Associations
             TerraformResource::new("aws_route_table_association", "public_a")
@@ -80,7 +80,7 @@ impl ResourceMapping for AwsServerMapping {
                 .attr("name", format!("{prefix}-sg"))
                 .attr("description", format!("Cooper security group for {prefix}"))
                 .attr_ref("vpc_id", "aws_vpc.main.id")
-                .attr_block("tags", json!({"Name": format!("{prefix}-sg")})),
+                .attr_map("tags", json!({"Name": format!("{prefix}-sg")})),
 
             // Ingress rules (separate resources to support multiple ports)
             TerraformResource::new("aws_vpc_security_group_ingress_rule", "http")
@@ -118,7 +118,7 @@ impl ResourceMapping for AwsServerMapping {
             TerraformResource::new("aws_ecr_repository", "app")
                 .attr("name", format!("{prefix}-app"))
                 .attr("force_delete", true)
-                .attr_block("tags", json!({"ManagedBy": "cooper"})),
+                .attr_map("tags", json!({"ManagedBy": "cooper"})),
 
             // CloudWatch Log Group
             TerraformResource::new("aws_cloudwatch_log_group", "app")
@@ -181,7 +181,7 @@ impl ResourceMapping for AwsServerMapping {
             TerraformResource::new("aws_db_subnet_group", db_name)
                 .attr("name", format!("{prefix}-{db_name}-subnet-group"))
                 .attr("subnet_ids", json!(["${aws_subnet.public_a.id}", "${aws_subnet.public_b.id}"]))
-                .attr_block("tags", json!({"Name": format!("{prefix}-{db_name}-subnet-group")})),
+                .attr_map("tags", json!({"Name": format!("{prefix}-{db_name}-subnet-group")})),
 
             // RDS Instance
             TerraformResource::new("aws_db_instance", db_name)
@@ -197,7 +197,7 @@ impl ResourceMapping for AwsServerMapping {
                 .attr("vpc_security_group_ids", json!([format!("${{aws_security_group.app.id}}")]))
                 .attr("skip_final_snapshot", true)
                 .attr("publicly_accessible", false)
-                .attr_block("tags", json!({"Name": format!("{prefix}-{db_name}"), "ManagedBy": "cooper"})),
+                .attr_map("tags", json!({"Name": format!("{prefix}-{db_name}"), "ManagedBy": "cooper"})),
         ]
     }
 
@@ -225,7 +225,7 @@ impl ResourceMapping for AwsServerMapping {
         vec![
             TerraformResource::new("aws_sns_topic", name)
                 .attr("name", format!("{prefix}-{name}"))
-                .attr_block("tags", json!({"ManagedBy": "cooper"})),
+                .attr_map("tags", json!({"ManagedBy": "cooper"})),
         ]
     }
 
@@ -236,7 +236,7 @@ impl ResourceMapping for AwsServerMapping {
             TerraformResource::new("aws_sqs_queue", name)
                 .attr("name", format!("{prefix}-{name}"))
                 .attr("visibility_timeout_seconds", 30)
-                .attr_block("tags", json!({"ManagedBy": "cooper"})),
+                .attr_map("tags", json!({"ManagedBy": "cooper"})),
         ]
     }
 
@@ -246,7 +246,7 @@ impl ResourceMapping for AwsServerMapping {
             TerraformResource::new("aws_s3_bucket", "storage")
                 .attr("bucket", format!("{prefix}-storage"))
                 .attr("force_destroy", true)
-                .attr_block("tags", json!({"Name": format!("{prefix}-storage"), "ManagedBy": "cooper"})),
+                .attr_map("tags", json!({"Name": format!("{prefix}-storage"), "ManagedBy": "cooper"})),
         ]
     }
 
@@ -311,7 +311,7 @@ fn container_definitions_ref(prefix: &str) -> String {
     s.push_str(&format!(
         "logConfiguration={{logDriver=\"awslogs\",options={{\"awslogs-group\"=\"/ecs/{prefix}\",",
     ));
-    s.push_str("\"awslogs-region\"=var.aws_region,\"awslogs-stream-prefix\"=\"ecs\"}}},");
+    s.push_str("\"awslogs-region\"=var.aws_region,\"awslogs-stream-prefix\"=\"ecs\"}},");
     s.push_str("environment=[]");
     s.push_str("}])}");
     s

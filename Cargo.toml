@@ -42,3 +42,4 @@ reqwest = { version = "0.12", features = ["json"] }
 regex = "1"
 futures = "0.3"
 pathdiff = "0.2"
+dotenvy = "0.15"

@@ -63,6 +63,34 @@ pub async fn terraform_plan(tf_dir: &str, credentials: &Credentials) -> Result<S
     Ok(stdout)
 }
 
+/// Run `terraform validate` in the given directory.
+pub async fn terraform_validate(tf_dir: &str, credentials: &Credentials) -> Result<String> {
+    eprintln!("  {} terraform validate", "  $".dimmed());
+    let output = Command::new("terraform")
+        .args(["validate", "-no-color"])
+        .current_dir(tf_dir)
+        .envs(credentials.env_vars())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .context("Failed to run terraform validate")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!(
+            "terraform validate failed:\n{}\n{}",
+            stdout,
+            stderr
+        ));
+    }
+
+    eprintln!("  {} terraform validate passed", "  ok".green());
+    Ok(stdout)
+}
+
 /// Run `terraform apply` using the saved plan.
 pub async fn terraform_apply(tf_dir: &str, credentials: &Credentials) -> Result<String> {
     eprintln!("  {} terraform apply", "  $".dimmed());

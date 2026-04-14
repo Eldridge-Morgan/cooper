@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A single Terraform resource block.
 #[derive(Debug, Clone)]
@@ -8,6 +8,8 @@ pub struct TerraformResource {
     pub type_name: String,
     pub name: String,
     pub attributes: BTreeMap<String, Value>,
+    /// Keys that are map arguments (rendered with `=`) rather than nested blocks.
+    map_keys: BTreeSet<String>,
 }
 
 impl TerraformResource {
@@ -16,6 +18,7 @@ impl TerraformResource {
             type_name: type_name.to_string(),
             name: name.to_string(),
             attributes: BTreeMap::new(),
+            map_keys: BTreeSet::new(),
         }
     }
 
@@ -35,13 +38,26 @@ impl TerraformResource {
         self
     }
 
+    /// Add a map-type argument (rendered as `key = { ... }` with `=`).
+    /// Use this for `tags`, `app_settings`, etc. — NOT for nested blocks.
+    pub fn attr_map(mut self, key: &str, map: Value) -> Self {
+        self.map_keys.insert(key.to_string());
+        self.attributes.insert(key.to_string(), map);
+        self
+    }
+
     pub fn to_hcl(&self) -> String {
         let mut hcl = format!(
             "resource \"{}\" \"{}\" {{\n",
             self.type_name, self.name
         );
         for (key, value) in &self.attributes {
-            write_attribute(&mut hcl, key, value, 2);
+            if self.map_keys.contains(key) {
+                // Map argument: key = { ... }
+                hcl.push_str(&format!("  {key} = {}\n", value_to_hcl(value)));
+            } else {
+                write_attribute(&mut hcl, key, value, 2);
+            }
         }
         hcl.push_str("}\n");
         hcl
@@ -305,9 +321,21 @@ impl TerraformConfig {
 pub fn value_to_hcl(value: &Value) -> String {
     match value {
         Value::String(s) => {
-            // Terraform references: ${...} or bare references
-            if s.starts_with("${") || s.starts_with("var.") || s.starts_with("local.") {
+            if s.starts_with("var.") || s.starts_with("local.") || s.starts_with("module.") {
+                // Already a bare reference
                 s.clone()
+            } else if s.starts_with("${") {
+                if s.ends_with('}') {
+                    // Pure reference or function call wrapped in ${...} — strip the outer wrapper.
+                    // e.g. ${aws_vpc.main.id}       → aws_vpc.main.id
+                    //      ${jsonencode({...})}      → jsonencode({...})
+                    //      ${"${var.aws_region}a"}   → "${var.aws_region}a"  (valid quoted HCL)
+                    s[2..s.len() - 1].to_string()
+                } else {
+                    // Reference embedded in a larger string, e.g. ${ref}/*/*
+                    // Wrap in quotes so it becomes a valid HCL string interpolation.
+                    format!("\"{}\"", s)
+                }
             } else {
                 format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
             }
@@ -330,12 +358,17 @@ pub fn value_to_hcl(value: &Value) -> String {
     }
 }
 
+/// Keys that are map arguments (need `= { ... }`) rather than nested blocks.
+fn is_map_attribute(key: &str) -> bool {
+    matches!(key, "tags" | "variables" | "app_settings" | "labels")
+}
+
 /// Write a single key = value attribute to HCL, handling nested blocks.
 fn write_attribute(hcl: &mut String, key: &str, value: &Value, indent: usize) {
     let pad = " ".repeat(indent);
     match value {
-        Value::Object(obj) if !key.is_empty() => {
-            // Nested block
+        Value::Object(obj) if !key.is_empty() && !is_map_attribute(key) => {
+            // Nested block (no `=`)
             hcl.push_str(&format!("{pad}{key} {{\n"));
             for (k, v) in obj {
                 write_attribute(hcl, k, v, indent + 2);

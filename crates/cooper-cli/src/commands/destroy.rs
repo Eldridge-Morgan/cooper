@@ -10,7 +10,19 @@ pub async fn run(env: &str) -> Result<()> {
         env.bold()
     );
 
-    let tf_dir = format!(".cooper/terraform/{env}");
+    // Read tf_dir from deploy state if available, fallback to default
+    let state_path_check = format!(".cooper/state/{env}/deploy.json");
+    let tf_dir = if Path::new(&state_path_check).exists() {
+        let content = std::fs::read_to_string(&state_path_check)?;
+        let state: serde_json::Value = serde_json::from_str(&content)?;
+        state
+            .get("tf_dir")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&format!("terraform/{env}"))
+            .to_string()
+    } else {
+        format!("terraform/{env}")
+    };
     let tf_state = format!("{tf_dir}/terraform.tfstate");
 
     // Check if Terraform state exists

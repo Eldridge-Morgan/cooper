@@ -55,7 +55,7 @@ pub async fn run(
     )?;
 
     // Step 3: Write to local directory
-    let tf_dir = format!(".cooper/terraform/{env}");
+    let tf_dir = format!("terraform/{env}");
     tf_config.write_to_disk(&tf_dir)?;
 
     eprintln!(
@@ -68,6 +68,20 @@ pub async fn run(
     eprintln!();
     eprintln!("{}", tf_config.format_preview());
 
+    // Show required IAM policy based on project analysis
+    if let Some(policy) = cooper_deploy::terraform::generator::required_iam_policy(
+        &provider, &service_type, &analysis,
+    ) {
+        eprintln!(
+            "  {} Required IAM policy for deployer user:\n",
+            "\u{2139}".blue()
+        );
+        for line in policy.lines() {
+            eprintln!("    {}", line);
+        }
+        eprintln!();
+    }
+
     // Dry-run: stop here
     if dry_run {
         eprintln!(
@@ -79,63 +93,104 @@ pub async fn run(
         return Ok(());
     }
 
-    // Step 5: Interactive menu
-    let actions = vec![
-        "Apply (proceed with deployment)",
-        "Edit files (open in $EDITOR)",
-        "Show full Terraform config",
-        "Cancel",
-    ];
+    // Step 5: Interactive menu (loop for plan/validate/output/edit/show)
+    let mut tf_initialized = false;
+    let mut credentials: Option<cooper_deploy::credentials::Credentials> = None;
 
-    let action = Select::new()
-        .with_prompt("  What would you like to do?")
-        .items(&actions)
-        .default(0)
-        .interact()?;
+    loop {
+        let actions = vec![
+            "Apply (proceed with deployment)",
+            "Plan (preview infrastructure changes)",
+            "Validate (check configuration)",
+            "Output (show current outputs)",
+            "Edit files (open in $EDITOR)",
+            "Show full Terraform config",
+            "Cancel",
+        ];
 
-    match action {
-        0 => {} // Proceed to apply
-        1 => {
-            open_editor(&tf_dir)?;
-            let proceed = Confirm::new()
-                .with_prompt("  Files edited. Proceed with deployment?")
-                .default(true)
-                .interact()?;
-            if !proceed {
+        let action = Select::new()
+            .with_prompt("  What would you like to do?")
+            .items(&actions)
+            .default(0)
+            .interact()?;
+
+        match action {
+            0 => {
+                // Confirm before applying
+                let proceed = Confirm::new()
+                    .with_prompt(format!(
+                        "  Apply infrastructure changes to '{}'?",
+                        env
+                    ))
+                    .default(false)
+                    .interact()?;
+                if proceed {
+                    break;
+                }
+                // User declined — return to menu
+            }
+            1 => {
+                // Plan: init + plan, show output
+                ensure_terraform_ready(&tf_dir, &provider, &mut credentials, &mut tf_initialized).await?;
+                let plan_output = cooper_deploy::terraform::executor::terraform_plan(
+                    &tf_dir,
+                    credentials.as_ref().unwrap(),
+                ).await?;
+                eprintln!("\n{}\n", plan_output);
+            }
+            2 => {
+                // Validate: init + validate
+                ensure_terraform_ready(&tf_dir, &provider, &mut credentials, &mut tf_initialized).await?;
+                let validate_output = cooper_deploy::terraform::executor::terraform_validate(
+                    &tf_dir,
+                    credentials.as_ref().unwrap(),
+                ).await?;
+                eprintln!("\n{}\n", validate_output);
+            }
+            3 => {
+                // Output: show terraform outputs (requires prior state)
+                cooper_deploy::terraform::executor::check_terraform()?;
+                if credentials.is_none() {
+                    eprintln!("\n  {} Checking cloud credentials...", "\u{2192}".cyan());
+                    credentials = Some(cooper_deploy::credentials::collect(&provider).await?);
+                }
+                let output = cooper_deploy::terraform::executor::terraform_output(
+                    &tf_dir,
+                    credentials.as_ref().unwrap(),
+                ).await?;
+                eprintln!("\n  {}\n", serde_json::to_string_pretty(&output)?);
+            }
+            4 => {
+                // Edit files
+                open_editor(&tf_dir)?;
+                tf_initialized = false; // files changed, may need re-init
+            }
+            5 => {
+                // Show full Terraform config
+                show_full_config(&tf_dir)?;
+            }
+            6 => {
+                // Cancel
                 eprintln!("  {} Cancelled", "\u{2717}".red());
                 return Ok(());
             }
+            _ => unreachable!(),
         }
-        2 => {
-            show_full_config(&tf_dir)?;
-            eprintln!();
-            let proceed = Confirm::new()
-                .with_prompt("  Proceed with deployment?")
-                .default(false)
-                .interact()?;
-            if !proceed {
-                eprintln!("  {} Cancelled", "\u{2717}".red());
-                return Ok(());
-            }
-        }
-        3 => {
-            eprintln!("  {} Cancelled", "\u{2717}".red());
-            return Ok(());
-        }
-        _ => unreachable!(),
     }
 
     // Step 6: Verify Terraform is installed before proceeding
     cooper_deploy::terraform::executor::check_terraform()?;
 
-    // Step 7: Collect cloud credentials
-    eprintln!(
-        "\n  {} Checking cloud credentials...",
-        "\u{2192}".cyan()
-    );
-    let credentials = cooper_deploy::credentials::collect(&provider).await?;
+    // Step 7: Collect cloud credentials (if not already collected during menu)
+    if credentials.is_none() {
+        eprintln!(
+            "\n  {} Checking cloud credentials...",
+            "\u{2192}".cyan()
+        );
+        credentials = Some(cooper_deploy::credentials::collect(&provider).await?);
+    }
 
-    // Step 7: Execute Terraform workflow
+    // Step 8: Execute Terraform workflow
     eprintln!(
         "\n  {} Deploying infrastructure...\n",
         "\u{2192}".cyan()
@@ -143,13 +198,13 @@ pub async fn run(
 
     let result = cooper_deploy::terraform::apply(
         &tf_dir,
-        &credentials,
+        credentials.as_ref().unwrap(),
         env,
         &project_name,
     )
     .await?;
 
-    // Step 8: Display results
+    // Step 9: Display results
     eprintln!(
         "\n  {} Deployment complete!",
         "\u{2713}".green()
@@ -191,6 +246,25 @@ pub async fn run(
     }
 
     eprintln!();
+    Ok(())
+}
+
+/// Ensure Terraform is installed, credentials are collected, and init has been run.
+async fn ensure_terraform_ready(
+    tf_dir: &str,
+    provider: &CloudProvider,
+    credentials: &mut Option<cooper_deploy::credentials::Credentials>,
+    initialized: &mut bool,
+) -> Result<()> {
+    cooper_deploy::terraform::executor::check_terraform()?;
+    if credentials.is_none() {
+        eprintln!("\n  {} Checking cloud credentials...", "\u{2192}".cyan());
+        *credentials = Some(cooper_deploy::credentials::collect(provider).await?);
+    }
+    if !*initialized {
+        cooper_deploy::terraform::executor::terraform_init(tf_dir, credentials.as_ref().unwrap()).await?;
+        *initialized = true;
+    }
     Ok(())
 }
 

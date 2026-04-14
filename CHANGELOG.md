@@ -2,6 +2,45 @@
 
 All notable changes to Cooper will be documented in this file.
 
+## [0.7.0] - 2026-04-14
+
+### Added
+
+- **Interactive deploy menu** — expanded from 4 to 7 options in a persistent loop:
+  - **Plan** — runs `terraform plan` and shows infrastructure diff
+  - **Validate** — runs `terraform validate` to check HCL syntax
+  - **Output** — shows current Terraform outputs (connection strings, URLs)
+  - **Apply** — now requires explicit confirmation prompt before proceeding
+  - **Edit files** — opens `$EDITOR`, resets init state on return
+  - **Show full config** — displays all `.tf` files inline
+  - **Cancel** — aborts cleanly
+  - Credentials and `terraform init` are lazily cached across menu selections
+
+- **`.env` file support** — `dotenvy` loads `.env` at CLI startup, so AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`) are picked up automatically without interactive prompts
+
+- **Project-specific IAM policy generation** — `cooper deploy` now outputs the minimum IAM policy required for the deployer user, derived from the project analysis:
+  - Only includes permissions for resources the project actually uses (databases → `rds:*`, topics → `sns:*`, queues → `sqs:*`)
+  - Compute permissions match the service type (server → `ecs:*`/`ecr:*`, serverless → `lambda:*`/`apigateway:*`)
+  - Displayed in the preview section before the interactive menu
+
+- **`attr_map()` builder method** on `TerraformResource` — distinguishes map arguments (`tags = { ... }`) from nested blocks (`ingress { ... }`) in HCL generation
+
+### Fixed
+
+- **HCL `tags` syntax** — `tags` was rendered as a block (`tags { ... }`) instead of an assignment (`tags = { ... }`), causing `terraform validate` to fail with "Unsupported block type"
+- **HCL nested map syntax** — `variables` inside `environment` blocks (Lambda) had the same block-vs-assignment issue; added `is_map_attribute()` check in `write_attribute` for `tags`, `variables`, `app_settings`, `labels`
+- **HCL `${...}` references** — bare `${aws_vpc.main.id}` in attribute values produced invalid HCL; `value_to_hcl` now strips the wrapper for pure references and quotes embedded interpolations
+- **`container_definitions` brace mismatch** — extra `}` in `container_definitions_ref()` closed the outer object too early, leaving `environment=[]` dangling outside the JSON array element
+- **`filebase64sha256("lambda.zip")`** — removed `source_code_hash` from Lambda resource since the zip doesn't exist at validate/plan time
+- **Double directory nesting** — `terraform/{project_name}/terraform/{env}` collapsed to `terraform/{env}` relative to project root
+- **Destroy path** — `cooper destroy` now reads `tf_dir` from deploy state, falls back to `terraform/{env}`
+
+### Changed
+
+- Terraform output directory moved from `.cooper/terraform/{env}/` to `terraform/{env}/` so generated files are visible and version-controllable
+- Apply action in the interactive menu now requires a `y/N` confirmation before proceeding
+- `cooper-cli` depends on `dotenvy` for `.env` loading
+
 ## [0.6.0] - 2026-04-13
 
 ### Added

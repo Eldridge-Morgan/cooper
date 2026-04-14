@@ -202,6 +202,9 @@ fn banner() {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env from the current directory if present (silently ignored if missing)
+    dotenvy::dotenv().ok();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

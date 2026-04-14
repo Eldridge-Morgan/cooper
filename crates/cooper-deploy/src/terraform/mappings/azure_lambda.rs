@@ -57,7 +57,7 @@ impl ResourceMapping for AzureLambdaMapping {
                         "node_version": "20"
                     }
                 }))
-                .attr_block("app_settings", json!({
+                .attr_map("app_settings", json!({
                     "NODE_ENV": "production",
                     "COOPER_ENV": config.env,
                     "FUNCTIONS_WORKER_RUNTIME": "node"
