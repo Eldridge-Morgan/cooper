@@ -2,6 +2,22 @@
 
 All notable changes to Cooper will be documented in this file.
 
+## [0.7.1] - 2026-04-15
+
+### Added
+
+- **Windows support** — cross-platform binary builds for `x86_64-pc-windows-msvc`:
+  - Added Windows target to CI release workflow (`windows-latest` runner)
+  - Windows binary packaged as `.zip` (instead of `.tar.gz`) with SHA256 checksum
+  - New npm platform package `@eldridge-morgan/cooper-win32-x64` published automatically on release
+  - `install.js` postinstall resolver handles `.exe` binary name on Windows
+  - `install.sh` already supported Windows via MINGW/MSYS/CYGWIN detection
+
+### Changed
+
+- Release workflow packaging split into OS-specific steps (Unix: `tar.gz`, Windows: `zip` via PowerShell `Compress-Archive`)
+- `npm/cooper-cli/package.json` now includes `@eldridge-morgan/cooper-win32-x64` in `optionalDependencies`
+
 ## [0.7.0] - 2026-04-14
 
 ### Added
