@@ -97,12 +97,15 @@ pub async fn run(
     }
 
     if let Some(ttl) = auto_destroy_after {
+        cooper_deploy::scheduler::schedule_destroy(&provider, env, &project_name, &ttl).await?;
         eprintln!(
-            "\n  {} Environment will auto-destroy after {}",
+            "\n  {} Auto-destroy scheduled — this environment will be torn down after {}",
             "⏱".yellow(),
             ttl
         );
-        // TODO: Schedule destruction via cloud scheduler
+        if let Some((remaining, _)) = cooper_deploy::scheduler::time_remaining(env) {
+            eprintln!("    {}", remaining.dimmed());
+        }
     }
 
     eprintln!();
