@@ -1,6 +1,7 @@
 pub mod cloud;
 pub mod credentials;
 pub mod diff;
+pub mod docker;
 pub mod providers;
 pub mod provisioner;
 pub mod state;

@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 /// Parses human-readable schedules ("every 1 hour") and cron expressions.
 pub struct CronScheduler {
     jobs: Vec<CronJob>,
-    running: Arc<RwLock<bool>>,
+    _running: Arc<RwLock<bool>>,
 }
 
 struct CronJob {
@@ -26,7 +26,7 @@ impl CronScheduler {
 
         Self {
             jobs,
-            running: Arc::new(RwLock::new(false)),
+            _running: Arc::new(RwLock::new(false)),
         }
     }
 

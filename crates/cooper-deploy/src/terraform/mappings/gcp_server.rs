@@ -90,7 +90,7 @@ impl ResourceMapping for GcpServerMapping {
         let db_name = &db.name;
         let db_version = match db.engine.as_str() {
             "mysql" => "MYSQL_8_0",
-            _ => "POSTGRES_15",
+            _ => "POSTGRES_16",
         };
 
         vec![

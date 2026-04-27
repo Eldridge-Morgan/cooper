@@ -11,7 +11,7 @@ use tokio::process::Command;
 pub struct FlyProvisioner {
     region: String,
     org: String,
-    client: Client,
+    _client: Client,
 }
 
 impl FlyProvisioner {
@@ -19,7 +19,7 @@ impl FlyProvisioner {
         Self {
             region: std::env::var("FLY_REGION").unwrap_or_else(|_| "iad".to_string()),
             org: std::env::var("FLY_ORG").unwrap_or_else(|_| "personal".to_string()),
-            client: Client::new(),
+            _client: Client::new(),
         }
     }
 

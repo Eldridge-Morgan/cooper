@@ -2,6 +2,66 @@
 
 All notable changes to Cooper will be documented in this file.
 
+## [0.10.0] - 2026-04-27
+
+### Fixed
+
+- **Docker Desktop socket mismatch** — `DOCKER_HOST` now explicitly set to `unix:///var/run/docker.sock` to avoid errors when Docker Desktop is not running or has been replaced with `docker.io`
+- **ECR credential helper error** — removed `"credsStore": "desktop"` from `~/.docker/config.json` so ECR auth works without Docker Desktop's credential helper
+- **AWS VPC limit exceeded** — deploy now surfaces clear error when the AWS account has reached its VPC quota, prompting cleanup before retry
+
+### Investigated
+
+- **`/user` route returning no data in production** — traced to silent migration failures in the container entrypoint (`2>/dev/null || true` suppresses psql errors); tables may not exist if migrations never ran. RDS environment variable `COOPER_DB_MAIN_URL` must be verified in ECS task definition.
+
+## [0.9.0] - 2026-04-24
+
+### Added
+
+- **SSL support for RDS databases** — connection strings now include `?sslmode=require` and Node `pg` driver automatically disables certificate validation for AWS RDS
+- **Terraform state refresh** — `cooper deploy` and `cooper destroy` now run `terraform refresh` before operations to sync state with actual cloud resources, catching orphaned resources from cancelled deploys
+- **Auto-import of orphaned resources** — if `terraform apply` fails with "already exists" errors, Cooper automatically imports the orphaned resource into state and retries
+- **ENI retry logic on destroy** — `terraform destroy` now retries up to 3 times (30s/60s/90s backoff) to handle AWS ENI release delays after ECS Fargate task shutdown
+- **PostgreSQL client in Docker** — Dockerfile now installs `postgresql-client` so migrations run automatically on container startup via `entrypoint.sh`
+- **SECRET environment variable** — generated Terraform now includes a random 32-character `SECRET` variable for password hashing and encryption
+
+### Changed
+
+- Docker build reverted from `docker buildx build --push` back to simple `docker build` + `docker push` for reliability and speed
+- SDK overlay now copies local `sdk/dist/` on top of `node_modules` copies so local fixes always take precedence over published npm packages
+- Build process now includes `nats` in runtime dependencies for pubsub functionality
+- Build now marks `nats` as external in `bun build` so it's installed at runtime, not bundled
+
+### Fixed
+
+- "self signed certificate in certificate chain" error when connecting to RDS — SSL now configured correctly via pool options instead of being overridden by URL parsing
+- "failed to load images" Docker Desktop error from corrupted buildx builder state
+- Missing `nats` package at runtime causing "Cannot find package 'nats'" errors
+- Duplicate `COOPER_DB_MAIN_URL` environment variables in ECS task definition
+- Build cache not being invalidated on cancelled deploys due to missing state refresh
+
+## [0.8.0] - 2026-04-21
+
+### Added
+
+- **Automated Docker build + ECR push** — `cooper deploy` now automatically builds the project, pushes the Docker image to ECR, and restarts the ECS service after Terraform apply completes
+- **`cooper serve` command** — new production server command that reads `cooper-manifest.json` and starts the HTTP server without embedded infra (Postgres/Valkey/NATS) or hot reload; used as the Docker container entrypoint
+- **Production Dockerfile** — generated Dockerfile now uses `oven/bun:1` (Debian/glibc-compatible), includes the cooper runtime binary, and runs `cooper serve`
+- **Bridge path resolution** — runtime now finds `bridge.ts` in the project root for production deployments
+
+### Changed
+
+- `cooper build` now copies `services/`, `shared/`, `cooper.config.*`, `package.json`, and the cooper binary into `dist/` for complete production bundles
+- ALB health check path changed from `/` to `/_cooper/health` (built-in Cooper endpoint, always available)
+- ECS service now has `health_check_grace_period_seconds = 60` to allow app startup time
+- Removed ECS cluster dependency cycle (`depends_on aws_ecs_service`)
+
+### Fixed
+
+- 503 errors after deploy caused by missing Docker image in ECR
+- Container crash caused by `bridge.ts` not finding sibling SDK files (`registry.ts`, `error.ts`)
+- glibc/musl incompatibility — base image changed from Alpine to Debian
+
 ## [0.7.1] - 2026-04-15
 
 ### Added

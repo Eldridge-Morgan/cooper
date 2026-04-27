@@ -16,6 +16,7 @@ pub struct MappingConfig {
     pub env: String,
     pub project_name: String,
     pub region: String,
+    pub database_names: Vec<String>,
 }
 
 /// Trait that each cloud+service mapping implements.

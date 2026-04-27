@@ -25,6 +25,7 @@ pub fn generate_config(
         env: env.to_string(),
         project_name: project_name.to_string(),
         region,
+        database_names: analysis.databases.iter().map(|db| db.name.clone()).collect(),
     };
 
     let mut tf = TerraformConfig::new();
@@ -205,6 +206,7 @@ fn aws_iam_policy(service_type: &ServiceType, analysis: &ProjectAnalysis) -> Str
         ServiceType::Server => {
             actions.push("ecs:*");
             actions.push("ecr:*");
+            actions.push("elasticloadbalancing:*");
         }
         ServiceType::Serverless => {
             actions.push("lambda:*");

@@ -204,6 +204,71 @@ pub async fn run(
     )
     .await?;
 
+    // Step 8b: Build and push Docker image to ECR (AWS server deployments only)
+    if matches!(provider, CloudProvider::Aws) && matches!(service_type, ServiceType::Server) {
+        let ecr_url = result
+            .resources
+            .iter()
+            .find(|r| r.name == "ecr_repository_url")
+            .and_then(|r| r.connection_info.as_deref())
+            .ok_or_else(|| anyhow::anyhow!("ECR repository URL not found in terraform outputs"))?
+            .to_string();
+
+        let region = credentials
+            .as_ref()
+            .unwrap()
+            .env_vars()
+            .get("AWS_REGION")
+            .cloned()
+            .unwrap_or_else(|| "us-east-1".to_string());
+
+        eprintln!(
+            "\n  {} Building project...\n",
+            "\u{2192}".cyan()
+        );
+
+        // Build the project (generates dist/ with Dockerfile, bundle, etc.)
+        let dist_dir = "dist";
+        super::build::run(dist_dir).await?;
+
+        eprintln!(
+            "\n  {} Pushing container image...\n",
+            "\u{2192}".cyan()
+        );
+
+        cooper_deploy::docker::build_and_push_to_ecr(
+            &ecr_url,
+            &region,
+            dist_dir,
+            credentials.as_ref().unwrap(),
+        )
+        .await?;
+
+        // Force ECS to pull the new image
+        let default_cluster = format!("cooper-{project_name}-{env}-cluster");
+        let cluster_name = result
+            .resources
+            .iter()
+            .find(|r| r.name == "ecs_cluster_name")
+            .and_then(|r| r.connection_info.as_deref())
+            .unwrap_or(&default_cluster);
+
+        let default_service = format!("cooper-{project_name}-{env}-service");
+        let service_name = result
+            .resources
+            .iter()
+            .find(|r| r.name == "ecs_service_name")
+            .and_then(|r| r.connection_info.as_deref())
+            .unwrap_or(&default_service);
+
+        cooper_deploy::docker::force_ecs_redeploy(
+            cluster_name,
+            service_name,
+            credentials.as_ref().unwrap(),
+        )
+        .await?;
+    }
+
     // Step 9: Display results
     eprintln!(
         "\n  {} Deployment complete!",

@@ -32,6 +32,13 @@ enum Commands {
         port: u16,
     },
 
+    /// Start production server (no embedded infra, no hot reload)
+    Serve {
+        /// Port to listen on
+        #[arg(short, long, default_value = "4000")]
+        port: u16,
+    },
+
     /// Run tests with embedded infrastructure
     Test {
         /// Run only tests matching this pattern
@@ -222,6 +229,9 @@ async fn main() -> Result<()> {
         Commands::Run { all, port } => {
             banner();
             commands::run::run(all, port).await
+        }
+        Commands::Serve { port } => {
+            commands::serve::run(port).await
         }
         Commands::Test { filter, fail_fast } => {
             banner();

@@ -225,6 +225,12 @@ impl JsRuntime {
             return Ok(scoped_path);
         }
 
+        // Production: bridge.ts in the project root (deployed container)
+        let prod_path = self.project_root.join("bridge.ts");
+        if prod_path.exists() {
+            return Ok(prod_path);
+        }
+
         // Fallback: bundled bridge next to the binary
         let exe = std::env::current_exe()?;
         let bundled = exe.parent().unwrap().join("bridge.js");

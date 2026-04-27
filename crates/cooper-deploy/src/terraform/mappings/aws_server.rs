@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 pub struct AwsServerMapping;
 
 impl ResourceMapping for AwsServerMapping {
-    fn providers(&self, config: &MappingConfig) -> Vec<TerraformProvider> {
+    fn providers(&self, _config: &MappingConfig) -> Vec<TerraformProvider> {
         vec![
             TerraformProvider {
                 name: "aws".to_string(),
@@ -104,6 +104,29 @@ impl ResourceMapping for AwsServerMapping {
                 .attr("to_port", 4000)
                 .attr("ip_protocol", "tcp"),
 
+            // Allow DB traffic within the security group (ECS → RDS)
+            TerraformResource::new("aws_vpc_security_group_ingress_rule", "postgres")
+                .attr_ref("security_group_id", "aws_security_group.app.id")
+                .attr_ref("referenced_security_group_id", "aws_security_group.app.id")
+                .attr("from_port", 5432)
+                .attr("to_port", 5432)
+                .attr("ip_protocol", "tcp"),
+
+            TerraformResource::new("aws_vpc_security_group_ingress_rule", "mysql")
+                .attr_ref("security_group_id", "aws_security_group.app.id")
+                .attr_ref("referenced_security_group_id", "aws_security_group.app.id")
+                .attr("from_port", 3306)
+                .attr("to_port", 3306)
+                .attr("ip_protocol", "tcp"),
+
+            // Allow Redis traffic within the security group (ECS → ElastiCache)
+            TerraformResource::new("aws_vpc_security_group_ingress_rule", "redis")
+                .attr_ref("security_group_id", "aws_security_group.app.id")
+                .attr_ref("referenced_security_group_id", "aws_security_group.app.id")
+                .attr("from_port", 6379)
+                .attr("to_port", 6379)
+                .attr("ip_protocol", "tcp"),
+
             TerraformResource::new("aws_vpc_security_group_egress_rule", "all")
                 .attr_ref("security_group_id", "aws_security_group.app.id")
                 .attr("cidr_ipv4", "0.0.0.0/0")
@@ -114,6 +137,11 @@ impl ResourceMapping for AwsServerMapping {
     fn map_compute(&self, _routes: &[RouteInfo], config: &MappingConfig) -> Vec<TerraformResource> {
         let prefix = &config.prefix;
         vec![
+            // Random SECRET for app (used for password hashing, etc.)
+            TerraformResource::new("random_password", "secret")
+                .attr("length", 32)
+                .attr("special", true),
+
             // ECR Repository
             TerraformResource::new("aws_ecr_repository", "app")
                 .attr("name", format!("{prefix}-app"))
@@ -142,7 +170,41 @@ impl ResourceMapping for AwsServerMapping {
                 .attr("memory", "512")
                 .attr_ref("execution_role_arn", "aws_iam_role.ecs_execution.arn")
                 .attr_ref("task_role_arn", "aws_iam_role.ecs_task.arn")
-                .attr("container_definitions", container_definitions_ref(prefix)),
+                .attr("container_definitions", container_definitions_ref(prefix, &config.database_names)),
+
+            // ALB
+            TerraformResource::new("aws_lb", "app")
+                .attr("name", format!("{prefix}-alb"))
+                .attr("internal", false)
+                .attr("load_balancer_type", "application")
+                .attr("security_groups", json!([format!("${{aws_security_group.app.id}}")]))
+                .attr("subnets", json!(["${aws_subnet.public_a.id}", "${aws_subnet.public_b.id}"]))
+                .attr_map("tags", json!({"Name": format!("{prefix}-alb"), "ManagedBy": "cooper"})),
+
+            TerraformResource::new("aws_lb_target_group", "app")
+                .attr("name", format!("{prefix}-tg"))
+                .attr("port", 4000)
+                .attr("protocol", "HTTP")
+                .attr("target_type", "ip")
+                .attr_ref("vpc_id", "aws_vpc.main.id")
+                .attr_block("health_check", json!({
+                    "path": "/_cooper/health",
+                    "port": "4000",
+                    "protocol": "HTTP",
+                    "healthy_threshold": 2,
+                    "unhealthy_threshold": 3,
+                    "timeout": 5,
+                    "interval": 30
+                })),
+
+            TerraformResource::new("aws_lb_listener", "app")
+                .attr_ref("load_balancer_arn", "aws_lb.app.arn")
+                .attr("port", 80)
+                .attr("protocol", "HTTP")
+                .attr_block("default_action", json!({
+                    "type": "forward",
+                    "target_group_arn": "${aws_lb_target_group.app.arn}"
+                })),
 
             // ECS Service
             TerraformResource::new("aws_ecs_service", "app")
@@ -151,11 +213,19 @@ impl ResourceMapping for AwsServerMapping {
                 .attr_ref("task_definition", "aws_ecs_task_definition.app.arn")
                 .attr("desired_count", 1)
                 .attr("launch_type", "FARGATE")
+                .attr("force_new_deployment", true)
+                .attr("health_check_grace_period_seconds", 60)
                 .attr_block("network_configuration", json!({
                     "subnets": ["${aws_subnet.public_a.id}", "${aws_subnet.public_b.id}"],
                     "security_groups": ["${aws_security_group.app.id}"],
                     "assign_public_ip": true
-                })),
+                }))
+                .attr_block("load_balancer", json!({
+                    "target_group_arn": "${aws_lb_target_group.app.arn}",
+                    "container_name": "app",
+                    "container_port": 4000
+                }))
+                .depends_on(&["aws_lb_listener.app"]),
         ]
     }
 
@@ -168,7 +238,7 @@ impl ResourceMapping for AwsServerMapping {
         };
         let engine_version = match db.engine.as_str() {
             "mysql" => "8.0",
-            _ => "15.4",
+            _ => "16",
         };
 
         vec![
@@ -283,6 +353,11 @@ impl ResourceMapping for AwsServerMapping {
     fn outputs(&self, _config: &MappingConfig) -> Vec<TerraformOutput> {
         vec![
             TerraformOutput::new(
+                "app_url",
+                "\"http://${aws_lb.app.dns_name}\"",
+                "Public URL to access the application",
+            ),
+            TerraformOutput::new(
                 "ecr_repository_url",
                 "aws_ecr_repository.app.repository_url",
                 "ECR repository URL for container images",
@@ -301,9 +376,7 @@ impl ResourceMapping for AwsServerMapping {
     }
 }
 
-/// Build the container_definitions attribute as a Terraform jsonencode expression.
-/// This avoids format!() issues with nested braces.
-fn container_definitions_ref(prefix: &str) -> String {
+fn container_definitions_ref(prefix: &str, db_names: &[String]) -> String {
     let mut s = String::from("${jsonencode([{");
     s.push_str("name=\"app\",");
     s.push_str("image=\"${aws_ecr_repository.app.repository_url}:latest\",");
@@ -312,7 +385,24 @@ fn container_definitions_ref(prefix: &str) -> String {
         "logConfiguration={{logDriver=\"awslogs\",options={{\"awslogs-group\"=\"/ecs/{prefix}\",",
     ));
     s.push_str("\"awslogs-region\"=var.aws_region,\"awslogs-stream-prefix\"=\"ecs\"}},");
-    s.push_str("environment=[]");
+
+    s.push_str("environment=[");
+    for (i, db_name) in db_names.iter().enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        let env_key = format!("COOPER_DB_{}_URL", db_name.to_uppercase());
+        let engine = "postgresql";
+        s.push_str(&format!(
+            "{{name=\"{env_key}\",value=\"{engine}://cooper:${{random_password.db_{db_name}.result}}@${{aws_db_instance.{db_name}.endpoint}}/cooper?sslmode=require\"}}"
+        ));
+    }
+    if !db_names.is_empty() {
+        s.push(',');
+    }
+    s.push_str("{name=\"SECRET\",value=\"${random_password.secret.result}\"}");
+    s.push(']');
+
     s.push_str("}])}");
     s
 }

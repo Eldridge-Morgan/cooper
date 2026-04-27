@@ -10,6 +10,8 @@ pub struct TerraformResource {
     pub attributes: BTreeMap<String, Value>,
     /// Keys that are map arguments (rendered with `=`) rather than nested blocks.
     map_keys: BTreeSet<String>,
+    /// Explicit depends_on references (e.g. "aws_ecs_service.app").
+    depends_on: Vec<String>,
 }
 
 impl TerraformResource {
@@ -19,7 +21,13 @@ impl TerraformResource {
             name: name.to_string(),
             attributes: BTreeMap::new(),
             map_keys: BTreeSet::new(),
+            depends_on: Vec::new(),
         }
+    }
+
+    pub fn depends_on(mut self, refs: &[&str]) -> Self {
+        self.depends_on.extend(refs.iter().map(|s| s.to_string()));
+        self
     }
 
     pub fn attr(mut self, key: &str, value: impl Into<Value>) -> Self {
@@ -58,6 +66,10 @@ impl TerraformResource {
             } else {
                 write_attribute(&mut hcl, key, value, 2);
             }
+        }
+        if !self.depends_on.is_empty() {
+            let refs: Vec<String> = self.depends_on.iter().map(|r| format!("    {r}")).collect();
+            hcl.push_str(&format!("  depends_on = [\n{}\n  ]\n", refs.join(",\n")));
         }
         hcl.push_str("}\n");
         hcl
@@ -386,6 +398,7 @@ fn estimate_cost(resource_type: &str) -> f64 {
         // AWS
         "aws_db_instance" => 28.0,
         "aws_elasticache_cluster" => 12.0,
+        "aws_lb" => 16.0,
         "aws_ecs_service" => 0.0,
         "aws_lambda_function" => 0.0,
         // GCP

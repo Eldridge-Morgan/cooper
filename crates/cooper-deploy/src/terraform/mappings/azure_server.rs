@@ -116,7 +116,7 @@ impl ResourceMapping for AzureServerMapping {
                 .attr("name", format!("{prefix}-{db_name}"))
                 .attr_ref("resource_group_name", "azurerm_resource_group.main.name")
                 .attr_ref("location", "azurerm_resource_group.main.location")
-                .attr("version", "15")
+                .attr("version", "16")
                 .attr("sku_name", "B_Standard_B1ms")
                 .attr("storage_mb", 32768)
                 .attr("administrator_login", "cooper")

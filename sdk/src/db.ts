@@ -60,7 +60,16 @@ export function database(name: string, config?: DatabaseConfig): DatabaseClient 
     poolPromise = (async () => {
       if (engine === "postgres") {
         const pg = await import("pg");
-        pool = new pg.default.Pool({ connectionString: connStr });
+        let cleanConnStr = connStr;
+        const needsSsl = connStr.includes("sslmode=require");
+        if (needsSsl) {
+          cleanConnStr = connStr.replace(/[?&]sslmode=require/g, "").replace(/\?&/, "?").replace(/\?$/, "");
+        }
+        const poolOpts: any = { connectionString: cleanConnStr };
+        if (needsSsl) {
+          poolOpts.ssl = { rejectUnauthorized: false };
+        }
+        pool = new pg.default.Pool(poolOpts);
         // Prevent unhandled error crash on connection termination (e.g., Docker stop)
         pool.on("error", (err: Error) => {
           console.error(`[cooper] Database pool error: ${err.message}`);

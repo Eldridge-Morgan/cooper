@@ -39,10 +39,12 @@ pub async fn apply(
 }
 
 /// Destroy Terraform-managed infrastructure.
+/// Refreshes state first to catch orphaned resources from cancelled deploys.
 pub async fn destroy(
     tf_dir: &str,
     credentials: &crate::credentials::Credentials,
 ) -> Result<()> {
     executor::terraform_init(tf_dir, credentials).await?;
+    executor::terraform_refresh(tf_dir, credentials).await?;
     executor::terraform_destroy(tf_dir, credentials).await
 }

@@ -11,5 +11,6 @@ pub mod mcp;
 pub mod new_project;
 pub mod run;
 pub mod secrets;
+pub mod serve;
 pub mod test;
 pub mod trace;
